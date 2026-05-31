@@ -43,7 +43,7 @@ from mcp_security_agent.schemas import (
 
 
 # ══════════════════════════════════════════════
-# 节点函数
+# 节点函数（LangGraph调度员）
 # 每个函数接收 GraphState，返回更新后的字段（字典）
 # LangGraph 会把返回的字典合并回 State
 # ══════════════════════════════════════════════
@@ -311,7 +311,7 @@ def build_graph():
     graph.add_node("evaluate", node_evaluate)
     graph.add_node("report", node_report)
 
-    # 固定边（顺序执行）
+    # 固定边（按照顺序执行，一个agent结束后叫下一个）
     graph.set_entry_point("inventory")
     graph.add_edge("inventory", "profile")
     graph.add_edge("profile", "extract")
