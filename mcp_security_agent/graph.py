@@ -349,3 +349,7 @@ if __name__ == "__main__":
     print("=" * 50)
     if result["final_report"]:
         print(result["final_report"].report_markdown)
+        os.makedirs("results", exist_ok=True)
+        with open("results/report.md", "w") as f:
+            f.write(result["final_report"].report_markdown)
+        print("📄 报告已保存到 results/report.md")
