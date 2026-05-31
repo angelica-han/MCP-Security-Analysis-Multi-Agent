@@ -2,7 +2,7 @@
 graph.py — LangGraph 图骨架
 
 这里定义了整个分析流水线的结构：节点、边、条件路由。
-现在每个节点都是"占位函数"（返回假数据），
+现在除了第一个节点都是"占位函数"（返回假数据），
 之后我们会一个一个替换成真正的 Agent。
 
 流程图：
@@ -26,20 +26,18 @@ graph.py — LangGraph 图骨架
 """
 
 import os
-import uuid
 from langgraph.graph import StateGraph, END
 
+from mcp_security_agent.agents.risk_command import scan_command_risks
 from mcp_security_agent.schemas import (
     GraphState,
     FileInventory,
     FileInfo,
     ProjectProfile,
-    CodeFeature,
-    CodeSource,
-    RiskFinding,
     EvalResult,
     FinalReport,
 )
+from mcp_security_agent.tools.ast_scanner import scan_project
 
 
 # ══════════════════════════════════════════════
@@ -130,27 +128,18 @@ def node_profile(state: GraphState) -> dict:
 
 def node_extract(state: GraphState) -> dict:
     """
-    节点3：代码特征提取（占位）
-    TODO: 替换成真正的 AST 扫描器 + regex 扫描器
+    节点3：代码特征提取
+    使用 AST 扫描器从真实 Python 代码里提取 MCP tools 和危险 sink。
     """
-    print("⚙️  [extract] 提取代码特征（占位）...")
+    print("⚙️  [extract] 提取代码特征...")
 
-    # 占位数据：造一个假的 subprocess 调用特征
-    feature = CodeFeature(
-        feature_id=str(uuid.uuid4())[:8],
-        feature_type="command_execution",
-        source=CodeSource(
-            file_path="server.py",
-            line_start=42,
-            line_end=44,
-            snippet='subprocess.run(f"ls {user_input}", shell=True)',
-        ),
-        user_controlled_inputs=["user_input"],
-        sink="subprocess.run",
-        notes="用户输入直接拼接进 shell 命令，存在命令注入风险",
+    features = scan_project(
+        project_path=state.scan_request.project_path,
+        inventory=state.file_inventory,
     )
 
-    return {"code_features": [feature]}
+    print(f"   提取到 {len(features)} 个代码特征")
+    return {"code_features": features}
 
 
 def node_supervisor(state: GraphState) -> dict:
@@ -165,27 +154,15 @@ def node_supervisor(state: GraphState) -> dict:
 
 def node_scan_command(state: GraphState) -> dict:
     """
-    节点5a：命令执行风险扫描（占位）
-    TODO: 替换成真正的 ReAct Agent
+    节点5a：命令执行风险扫描
+    第一版使用确定性规则，之后可加 LLM 解释层。
     """
-    print("💣 [scan_command] 扫描命令执行风险（占位）...")
+    print("💣 [scan_command] 扫描命令执行风险...")
 
-    finding = RiskFinding(
-        finding_id=str(uuid.uuid4())[:8],
-        risk_type="command_exec",
-        severity="high",
-        confidence=0.85,
-        file_path="server.py",
-        line_range=(42, 44),
-        evidence='subprocess.run(f"ls {user_input}", shell=True)',
-        attack_path="用户输入 user_input → f-string 拼接 → subprocess.run(shell=True) → 任意命令执行",
-        impact="攻击者可在服务器上执行任意系统命令",
-        remediation="使用 subprocess.run(['ls', user_input], shell=False) 并对 user_input 做白名单校验",
-        source_feature_id=state.code_features[0].feature_id if state.code_features else None,
-    )
+    findings = scan_command_risks(state.code_features)
+    print(f"   发现 {len(findings)} 条命令执行风险")
 
-    # 注意：这里用 + 合并列表，不是覆盖
-    return {"risk_findings": state.risk_findings + [finding]}
+    return {"risk_findings": state.risk_findings + findings}
 
 
 def node_scan_prompt_injection(state: GraphState) -> dict:
