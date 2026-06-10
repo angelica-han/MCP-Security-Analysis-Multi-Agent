@@ -51,7 +51,8 @@ def read_project_file(relative_path: str) -> str:
 @mcp.tool()
 def fetch_url(url: str) -> str:
     """Fetch a URL and return the first 1000 characters."""
-    response = requests.get(url, timeout=5)
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(url, headers=headers, timeout=5)
     return response.text[:1000]
 
 

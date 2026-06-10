@@ -1,26 +1,25 @@
 """
 graph.py — LangGraph 图骨架
 
-这里定义了整个分析流水线的结构：节点、边、条件路由。
-现在除了第一个节点都是"占位函数"（返回假数据），
-之后我们会一个一个替换成真正的 Agent。
-
 流程图：
     START
       ↓
-  [inventory]     读取目录，列出文件
+  [inventory]          读取目录，列出文件
       ↓
-  [profile]       分析项目功能（占位：假数据）
+  [profile]            分析项目功能（占位：假数据）
       ↓
-  [extract]       提取代码特征（占位：假数据）
+  [extract]            提取代码特征（AST 扫描器，真实逻辑）
       ↓
-  [supervisor]    决定跑哪些风险扫描
+  [supervisor]         决定跑哪些风险扫描
       ↓
-  [scan_*]        各风险扫描 Agent（占位：假数据）
+  [scan_command]       命令执行风险（真实逻辑）
+  [scan_prompt_injection] Prompt 注入风险（真实逻辑）
+  [scan_file]          文件访问风险（真实逻辑）
+  [scan_network]       网络 / SSRF 风险（真实逻辑）
       ↓
-  [evaluate]      Evaluator 检查质量
+  [evaluate]           Evaluator：accept / reject / merge / rerun（真实逻辑）
       ↓        ↘ needs_rerun → 回到 supervisor（最多2次）
-  [report]        生成最终报告
+  [report]             生成最终报告（占位）
       ↓
     END
 """
@@ -29,6 +28,10 @@ import os
 from langgraph.graph import StateGraph, END
 
 from mcp_security_agent.agents.risk_command import scan_command_risks
+from mcp_security_agent.agents.risk_prompt_injection import scan_prompt_injection_risks
+from mcp_security_agent.agents.risk_file import scan_file_risks
+from mcp_security_agent.agents.risk_network import scan_network_risks
+from mcp_security_agent.agents.evaluator import evaluate_findings
 from mcp_security_agent.schemas import (
     GraphState,
     FileInventory,
@@ -166,34 +169,61 @@ def node_scan_command(state: GraphState) -> dict:
 
 
 def node_scan_prompt_injection(state: GraphState) -> dict:
-    """节点5b：Prompt Injection 风险扫描（占位）"""
-    print("💉 [scan_prompt_injection] 扫描 Prompt 注入风险（占位，暂时跳过）...")
-    return {}
+    """节点5b：Prompt Injection 风险扫描（真实逻辑）"""
+    print("💉 [scan_prompt_injection] 扫描 Prompt 注入风险...")
+
+    findings = scan_prompt_injection_risks(state.code_features)
+    print(f"   发现 {len(findings)} 条 Prompt 注入风险")
+
+    return {"risk_findings": state.risk_findings + findings}
+
+
+def node_scan_file(state: GraphState) -> dict:
+    """节点5c：文件访问风险扫描（真实逻辑）"""
+    print("📂 [scan_file] 扫描文件访问风险...")
+
+    findings = scan_file_risks(state.code_features)
+    print(f"   发现 {len(findings)} 条文件访问风险")
+
+    return {"risk_findings": state.risk_findings + findings}
+
+
+def node_scan_network(state: GraphState) -> dict:
+    """节点5d：网络 / SSRF 风险扫描（真实逻辑）"""
+    print("🌐 [scan_network] 扫描网络 / SSRF 风险...")
+
+    findings = scan_network_risks(state.code_features)
+    print(f"   发现 {len(findings)} 条网络风险")
+
+    return {"risk_findings": state.risk_findings + findings}
 
 
 def node_evaluate(state: GraphState) -> dict:
     """
-    节点6：Evaluator，检查风险发现的质量（占位）
-    TODO: 替换成真正的评估 Agent
+    节点6：Evaluator — accept / reject / merge / rerun（真实逻辑）
+    不修改任何 evidence 字段，只操作 finding ID 列表。
     """
-    print("✅ [evaluate] 评估风险发现质量（占位）...")
+    print("✅ [evaluate] 评估风险发现质量...")
 
-    findings = state.risk_findings
-    accepted = all(f.confidence >= 0.55 and f.evidence for f in findings)
+    expected = state.scan_request.config.risk_categories if state.scan_request else None
+    eval_result = evaluate_findings(state.risk_findings, expected_categories=expected)
 
-    risk_summary = {}
-    for f in findings:
-        risk_summary[f.severity] = risk_summary.get(f.severity, 0) + 1
+    accepted_count = len(eval_result.accepted_finding_ids)
+    rejected_count = len(eval_result.rejected_finding_ids)
+    merged_count = len(eval_result.merged_finding_ids)
+    print(f"   接受 {accepted_count} 条 | 拒绝 {rejected_count} 条 | 合并 {merged_count} 条")
+    if eval_result.needs_rerun:
+        print(f"   ⚠️  覆盖缺口，申请重跑：{eval_result.rerun_categories}")
 
-    eval_result = EvalResult(
-        accepted=accepted,
-        overall_confidence=sum(f.confidence for f in findings) / len(findings) if findings else 0.0,
-        needs_rerun=False,
-        risk_summary=risk_summary,
-        evaluator_notes="占位评估：所有发现均通过基础检查",
-    )
+    # Filter risk_findings down to only accepted findings
+    accepted_set = set(eval_result.accepted_finding_ids)
+    accepted_findings = [f for f in state.risk_findings if f.finding_id in accepted_set]
 
-    return {"eval_result": eval_result}
+    return {
+        "eval_result": eval_result,
+        "risk_findings": accepted_findings,
+        "rerun_count": state.rerun_count + (1 if eval_result.needs_rerun else 0),
+    }
 
 
 def node_report(state: GraphState) -> dict:
@@ -285,6 +315,8 @@ def build_graph():
     graph.add_node("supervisor", node_supervisor)
     graph.add_node("scan_command", node_scan_command)
     graph.add_node("scan_prompt_injection", node_scan_prompt_injection)
+    graph.add_node("scan_file", node_scan_file)
+    graph.add_node("scan_network", node_scan_network)
     graph.add_node("evaluate", node_evaluate)
     graph.add_node("report", node_report)
 
@@ -294,11 +326,12 @@ def build_graph():
     graph.add_edge("profile", "extract")
     graph.add_edge("extract", "supervisor")
 
-    # Supervisor → 并行风险扫描（现在串行，之后可以改成并行）
+    # Supervisor → 串行风险扫描（4个 agent 依次执行，结果累积到 risk_findings）
     graph.add_edge("supervisor", "scan_command")
-    graph.add_edge("supervisor", "scan_prompt_injection")
-    graph.add_edge("scan_command", "evaluate")
-    graph.add_edge("scan_prompt_injection", "evaluate")
+    graph.add_edge("scan_command", "scan_prompt_injection")
+    graph.add_edge("scan_prompt_injection", "scan_file")
+    graph.add_edge("scan_file", "scan_network")
+    graph.add_edge("scan_network", "evaluate")
 
     # Evaluator 之后：条件路由
     graph.add_conditional_edges(

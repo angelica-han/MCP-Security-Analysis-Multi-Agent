@@ -21,7 +21,8 @@ class ScanConfig(BaseModel):
         default_factory=lambda: ["node_modules", ".venv", "dist", "__pycache__", ".git"]
     )
     risk_categories: list[str] = Field(
-        default_factory=lambda: ["prompt_injection", "command_exec", "file_access", "network", "lifecycle"]
+        # "lifecycle" omitted until risk_lifecycle.py agent is built
+        default_factory=lambda: ["prompt_injection", "command_exec", "file_access", "network"]
     )
     max_files: int = 100
     report_format: Literal["markdown", "json", "both"] = "markdown"
@@ -144,15 +145,20 @@ class RiskFinding(BaseModel):
 class EvalResult(BaseModel):
     """
     流水线第六站：Evaluator Agent 的输出
-    决定风险发现够不够好，要不要打回重做
+    决定风险发现够不够好，要不要打回重做。
+
+    规则：Evaluator 只能 accept / reject / merge / request_rerun。
+    禁止修改 evidence、attack_path 等字段（防止 LLM 捏造证据）。
     """
     accepted: bool
     overall_confidence: float = Field(ge=0.0, le=1.0)
     missing_categories: list[str] = Field(default_factory=list)
     needs_rerun: bool = False
     rerun_categories: list[str] = Field(default_factory=list)
+    # ID lists only — never rewritten content
+    accepted_finding_ids: list[str] = Field(default_factory=list)
     rejected_finding_ids: list[str] = Field(default_factory=list)
-    merged_finding_ids: list[str] = Field(default_factory=list)
+    merged_finding_ids: list[str] = Field(default_factory=list)   # IDs deduplicated into one
     risk_summary: dict[str, int] = Field(default_factory=dict)   # {"critical": 1, "high": 2}
     evaluator_notes: str = ""
 
