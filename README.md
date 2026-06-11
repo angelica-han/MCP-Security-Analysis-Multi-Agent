@@ -11,7 +11,7 @@ Point it at any MCP server/client project directory, and it will:
 1. **Scan the directory** — inventory all source files and filter out noise
 2. **Profile the project** — understand what MCP capabilities it exposes and where the trust boundaries are
 3. **Extract code features** — use static analysis (AST + regex) to find dangerous patterns like shell calls, file access, and network requests
-4. **Run risk agents** — five specialized agents scan for different vulnerability classes in parallel
+4. **Run risk agents** — specialized agents scan for different vulnerability classes in parallel (four live today, a fifth planned)
 5. **Evaluate quality** — an Evaluator checks that every finding has real evidence; low-confidence findings get flagged or sent back for re-scan
 6. **Generate a report** — structured Markdown + JSON output with evidence chains, attack paths, and remediation suggestions
 
@@ -23,14 +23,14 @@ Point it at any MCP server/client project directory, and it will:
 | Command Execution | `shell=True`, command concatenation, unvalidated parameters |
 | File Access | Path traversal, sensitive directory reads, missing allowlists |
 | Network Request | SSRF, arbitrary URLs, internal network access |
-| Lifecycle | Session state leakage, incomplete cleanup, log leakage |
+| Lifecycle *(planned)* | Session state leakage, incomplete cleanup, log leakage |
 
 ## Tech Stack
 
 - **LangGraph** — multi-agent orchestration (StateGraph, conditional routing, feedback loops)
-- **LangChain** — LLM calls, prompt templates, structured output parsing
 - **Pydantic** — typed schemas for all inter-agent data; prevents hallucinated evidence
 - **Python AST module** — deterministic code feature extraction (no LLM guessing)
+- **LangChain** *(planned)* — LLM calls for semantic interpretation in the capability-analysis and reporter agents
 
 ## Project Structure
 
@@ -52,8 +52,8 @@ mcp_security_agent/
     ├── file_inventory.py   # Directory walker and file filter
     ├── ast_scanner.py      # Python AST-based feature extraction
     └── regex_scanner.py    # Pattern matching for JS/TS and config files
-reports/                # Output reports land here
-sample_mcp_server/      # Example target project for testing
+results/                # Output reports land here (gitignored)
+sample_mcp_server/      # Deliberately vulnerable MCP server used as scan target
 tests/fixtures/         # Test fixtures
 ```
 
@@ -61,14 +61,13 @@ tests/fixtures/         # Test fixtures
 
 ```bash
 # Install dependencies
-pip install langgraph langchain langchain-openai pydantic
+pip install langgraph pydantic
 
-# Set your OpenAI API key
-export OPENAI_API_KEY=your_key_here
-
-# Run the skeleton (stub agents, no LLM calls needed)
+# Run the full pipeline against the sample vulnerable server
 python -m mcp_security_agent.graph
 ```
+
+No API key needed yet — the current risk agents use deterministic static analysis (AST + regex), not LLM calls. The report is written to `results/`.
 
 ## Current Status
 
@@ -76,12 +75,14 @@ python -m mcp_security_agent.graph
 |---|---|
 | Project structure | ✅ Done |
 | Pydantic schemas | ✅ Done |
-| LangGraph graph skeleton | ✅ Done — all nodes connected, full pipeline runs end-to-end |
-| Directory inventory (real logic) | ✅ Done |
+| LangGraph graph | ✅ Done — all nodes connected, full pipeline runs end-to-end |
+| Directory inventory | ✅ Done |
+| Code feature extraction (AST scanner) | ✅ Done |
+| Risk agents: command, file, network, prompt injection | ✅ Done — real static-analysis logic |
+| Evaluator agent | ⏳ Planned |
+| Risk agent: lifecycle | ⏳ Planned |
+| Regex scanner (JS/TS targets) | ⏳ Planned |
 | Capability analysis agent | 🔧 Stub — returns placeholder data |
-| Code feature extraction | 🔧 Stub — returns placeholder data |
-| Risk scan agents (×5) | 🔧 Stubs |
-| Evaluator agent | 🔧 Stub |
 | Reporter agent | 🔧 Stub |
 | CLI entry point | ⏳ Planned |
 
