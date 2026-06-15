@@ -6,9 +6,9 @@ graph.py — LangGraph 图骨架
       ↓
   [inventory]          读取目录，列出文件
       ↓
-  [profile]            分析项目功能（占位：假数据）
-      ↓
   [extract]            提取代码特征（AST 扫描器，真实逻辑）
+      ↓
+  [profile]            能力分析 Agent（V1 规则驱动，基于 code_features）
       ↓
   [supervisor]         决定跑哪些风险扫描
       ↓
@@ -27,6 +27,7 @@ graph.py — LangGraph 图骨架
 import os
 from langgraph.graph import StateGraph, END
 
+from mcp_security_agent.agents.functional import analyze_capabilities
 from mcp_security_agent.agents.risk_command import scan_command_risks
 from mcp_security_agent.agents.risk_prompt_injection import scan_prompt_injection_risks
 from mcp_security_agent.agents.risk_file import scan_file_risks
@@ -110,21 +111,20 @@ def node_inventory(state: GraphState) -> dict:
 
 def node_profile(state: GraphState) -> dict:
     """
-    节点2：能力分析 Agent（占位）
-    TODO: 替换成真正的 LLM Agent，分析项目功能和信任边界
+    节点3：能力分析 Agent（V1：规则驱动，无 LLM）
+    在 extract 之后运行，直接从 code_features 推断项目能力。
+    TODO (V2): 接入 LLM 做更丰富的语义分析
     """
-    print("🔍 [profile] 分析项目能力（占位）...")
+    print("🔍 [profile] 分析项目能力...")
 
-    # 占位数据：假装分析完了
-    profile = ProjectProfile(
-        project_type="mcp_server",
-        entry_points=["server.py"],
-        mcp_capabilities=["tools", "resources"],
-        sensitive_capabilities=["file_read", "shell_exec"],
-        trust_boundary="用户输入的参数直接传入工具函数，未经验证",
-        files_for_deep_scan=[{"path": "server.py", "reason": "入口文件，注册了 MCP tools"}],
-        summary="这是一个 MCP Server 示例项目（占位分析）",
+    profile = analyze_capabilities(
+        file_inventory=state.file_inventory,
+        code_features=state.code_features,
     )
+
+    print(f"   项目类型: {profile.project_type}")
+    print(f"   敏感能力: {profile.sensitive_capabilities}")
+    print(f"   需要深扫的文件: {len(profile.files_for_deep_scan)} 个")
 
     return {"project_profile": profile}
 
@@ -321,10 +321,12 @@ def build_graph():
     graph.add_node("report", node_report)
 
     # 固定边（按照顺序执行，一个agent结束后叫下一个）
+    # 顺序：inventory → extract → profile → supervisor
+    # extract 先跑 AST 扫描，profile 再用 code_features 推断项目能力
     graph.set_entry_point("inventory")
-    graph.add_edge("inventory", "profile")
-    graph.add_edge("profile", "extract")
-    graph.add_edge("extract", "supervisor")
+    graph.add_edge("inventory", "extract")
+    graph.add_edge("extract", "profile")
+    graph.add_edge("profile", "supervisor")
 
     # Supervisor → 串行风险扫描（4个 agent 依次执行，结果累积到 risk_findings）
     graph.add_edge("supervisor", "scan_command")
