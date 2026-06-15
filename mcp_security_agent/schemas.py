@@ -149,8 +149,12 @@ class EvalResult(BaseModel):
 
     规则：Evaluator 只能 accept / reject / merge / request_rerun。
     禁止修改 evidence、attack_path 等字段（防止 LLM 捏造证据）。
+
+    accepted:    至少有一条 finding 通过了质检（有实质发现）
+    pipeline_ok: 质检流程本身成功完成（包括"扫完但没发现问题"这种合法情况）
     """
-    accepted: bool
+    accepted: bool       # True = 有 findings 被接受
+    pipeline_ok: bool = True  # True = 质检流程正常完成（无论有没有发现）
     overall_confidence: float = Field(ge=0.0, le=1.0)
     missing_categories: list[str] = Field(default_factory=list)
     needs_rerun: bool = False

@@ -28,6 +28,41 @@ CONFIDENCE_THRESHOLD = 0.55
 # Severity order for merge decisions (higher index = higher severity)
 _SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
+# Two findings in the same file with the same risk_type are considered duplicates
+# if their line ranges are within this many lines of each other
+_LINE_PROXIMITY_TOLERANCE = 10
+
+
+def _ranges_are_close(r1: tuple[int, int], r2: tuple[int, int], tolerance: int = _LINE_PROXIMITY_TOLERANCE) -> bool:
+    """
+    Return True if two line ranges overlap or are within `tolerance` lines of each other.
+    e.g. (10, 15) and (20, 25) with tolerance=10 → True (gap is 5)
+         (10, 15) and (30, 35) with tolerance=10 → False (gap is 15)
+    """
+    return r1[0] - tolerance <= r2[1] and r2[0] - tolerance <= r1[1]
+
+
+def _cluster_by_proximity(findings: list[RiskFinding]) -> list[list[RiskFinding]]:
+    """
+    Group findings into clusters where every member is "close" to the seed finding.
+    Simple greedy approach: good enough for the small lists we deal with.
+    """
+    clusters: list[list[RiskFinding]] = []
+    used = [False] * len(findings)
+    for i, seed in enumerate(findings):
+        if used[i]:
+            continue
+        cluster = [seed]
+        used[i] = True
+        for j, other in enumerate(findings):
+            if used[j]:
+                continue
+            if _ranges_are_close(seed.line_range, other.line_range):
+                cluster.append(other)
+                used[j] = True
+        clusters.append(cluster)
+    return clusters
+
 
 def evaluate_findings(
     findings: list[RiskFinding],
@@ -67,25 +102,26 @@ def evaluate_findings(
         else:
             passing.append(f)
 
-    # ── Step 2: merge duplicates (same file + line_range + risk_type) ──
-    # Group by dedup key, keep the highest-severity finding in each group
-    dedup_key = lambda f: (f.file_path, f.line_range, f.risk_type)  # noqa: E731
-    groups: dict[tuple, list[RiskFinding]] = defaultdict(list)
+    # ── Step 2: merge duplicates (same file + risk_type + nearby lines) ──
+    # First group by (file_path, risk_type), then cluster by line proximity within each group.
+    # This handles cases where two agents flag the same vulnerability but report slightly
+    # different line ranges (e.g. "10-15" vs "10-20").
+    by_type: dict[tuple, list[RiskFinding]] = defaultdict(list)
     for f in passing:
-        groups[dedup_key(f)].append(f)
+        by_type[(f.file_path, f.risk_type)].append(f)
 
     surviving: list[RiskFinding] = []
-    for group in groups.values():
-        if len(group) == 1:
-            surviving.append(group[0])
-        else:
-            # Keep highest severity; if tied, keep highest confidence
-            best = max(group, key=lambda f: (_SEVERITY_ORDER[f.severity], f.confidence))
-            surviving.append(best)
-            # Everything else in this group is merged (not rejected)
-            for f in group:
-                if f.finding_id != best.finding_id:
-                    merged_ids.append(f.finding_id)
+    for type_group in by_type.values():
+        for cluster in _cluster_by_proximity(type_group):
+            if len(cluster) == 1:
+                surviving.append(cluster[0])
+            else:
+                # Keep highest severity; if tied, keep highest confidence
+                best = max(cluster, key=lambda f: (_SEVERITY_ORDER[f.severity], f.confidence))
+                surviving.append(best)
+                for f in cluster:
+                    if f.finding_id != best.finding_id:
+                        merged_ids.append(f.finding_id)
 
     # ── Step 3: accept the surviving set ──
     accepted_ids = [f.finding_id for f in surviving]
@@ -129,7 +165,8 @@ def evaluate_findings(
         notes_parts.append("All findings passed quality checks.")
 
     return EvalResult(
-        accepted=bool(accepted_ids) or not findings,
+        accepted=bool(accepted_ids),   # True only if at least one finding was accepted
+        pipeline_ok=True,              # evaluator completed successfully regardless
         overall_confidence=round(overall_confidence, 3),
         missing_categories=rerun_categories,
         needs_rerun=needs_rerun,
