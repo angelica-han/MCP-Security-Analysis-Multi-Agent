@@ -30,7 +30,7 @@ Point it at any MCP server/client project directory, and it will:
 - **LangGraph** — multi-agent orchestration (StateGraph, conditional routing, feedback loops)
 - **Pydantic** — typed schemas for all inter-agent data; prevents hallucinated evidence
 - **Python AST module** — deterministic code feature extraction (no LLM guessing)
-- **LangChain** *(planned)* — LLM calls for semantic interpretation in the capability-analysis and reporter agents
+- **LangChain / LLM layer** *(V2)* — semantic interpretation for capability analysis, supervisor routing, and report generation; all V1 agents are deterministic rule-based
 
 ## Project Structure
 
@@ -79,11 +79,12 @@ No API key needed yet — the current risk agents use deterministic static analy
 | Directory inventory | ✅ Done |
 | Code feature extraction (AST scanner) | ✅ Done |
 | Risk agents: command, file, network, prompt injection | ✅ Done — real static-analysis logic |
-| Evaluator agent | ⏳ Planned |
-| Risk agent: lifecycle | ⏳ Planned |
+| Capability analysis agent (`functional.py`) | ✅ Done — rule-based, infers project type + sensitive capabilities from AST features |
+| Supervisor routing | ✅ Done — activates only relevant scan categories based on detected capabilities |
+| Evaluator agent | ✅ Done — confidence threshold, proximity-based dedup, coverage gap detection, rerun loop |
+| Reporter agent | ✅ Done — structured Markdown with severity grouping, action plan (P0/P1/P2), coverage notes |
+| Risk agent: lifecycle | ⏳ Planned — session state leakage, incomplete cleanup, log leakage |
 | Regex scanner (JS/TS targets) | ⏳ Planned |
-| Capability analysis agent | 🔧 Stub — returns placeholder data |
-| Reporter agent | 🔧 Stub |
 | CLI entry point | ⏳ Planned |
 
 ## Design Principles

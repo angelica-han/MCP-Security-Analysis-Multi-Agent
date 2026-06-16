@@ -1,25 +1,25 @@
 """
-graph.py — LangGraph 图骨架
+graph.py — LangGraph pipeline definition
 
-流程图：
+Pipeline:
     START
       ↓
-  [inventory]          读取目录，列出文件
+  [inventory]              Walk the project directory; list candidate files
       ↓
-  [extract]            提取代码特征（AST 扫描器，真实逻辑）
+  [extract]                Extract code features via AST scanner
       ↓
-  [profile]            能力分析 Agent（V1 规则驱动，基于 code_features）
+  [profile]                Capability analysis agent (V1: rule-based, uses code_features)
       ↓
-  [supervisor]         决定跑哪些风险扫描
+  [supervisor]             Decide which risk-scan categories to activate
       ↓
-  [scan_command]       命令执行风险（真实逻辑）
-  [scan_prompt_injection] Prompt 注入风险（真实逻辑）
-  [scan_file]          文件访问风险（真实逻辑）
-  [scan_network]       网络 / SSRF 风险（真实逻辑）
+  [scan_command]           Command-execution risk scan
+  [scan_prompt_injection]  Prompt-injection risk scan
+  [scan_file]              File-access risk scan
+  [scan_network]           Network / SSRF risk scan
       ↓
-  [evaluate]           Evaluator：accept / reject / merge / rerun（真实逻辑）
-      ↓        ↘ needs_rerun → 回到 supervisor（最多2次）
-  [report]             生成最终报告（占位）
+  [evaluate]               Quality gate: accept / reject / merge / rerun
+      ↓        ↘ needs_rerun → back to supervisor (max 2 times)
+  [report]                 Generate final report
       ↓
     END
 """
@@ -46,17 +46,18 @@ from mcp_security_agent.tools.ast_scanner import scan_project
 
 
 # ══════════════════════════════════════════════
-# 节点函数（LangGraph调度员）
-# 每个函数接收 GraphState，返回更新后的字段（字典）
-# LangGraph 会把返回的字典合并回 State
+# Node functions
+# Each function receives GraphState and returns a dict of updated fields.
+# LangGraph merges the returned dict back into the shared state.
 # ══════════════════════════════════════════════
 
 def node_inventory(state: GraphState) -> dict:
     """
-    节点1：读取目录，列出所有候选文件
-    这是唯一一个现在就用真实逻辑的节点（纯 Python，不需要 LLM）
+    Node 1 — Directory inventory.
+    Walks the project path, classifies files by extension, and builds a
+    FileInventory. No LLM required; pure Python file-system traversal.
     """
-    print("📁 [inventory] 正在读取目录...")
+    print("📁 [inventory] Scanning project directory...")
 
     project_path = state.scan_request.project_path
     config = state.scan_request.config
@@ -72,7 +73,7 @@ def node_inventory(state: GraphState) -> dict:
     }
 
     for root, dirs, files in os.walk(project_path):
-        # 过滤掉不需要扫描的目录
+        # Skip directories that are unlikely to contain relevant source code
         dirs[:] = [d for d in dirs if d not in config.ignored_dirs]
 
         for filename in files:
@@ -106,64 +107,66 @@ def node_inventory(state: GraphState) -> dict:
         language_distribution=lang_dist,
     )
 
-    print(f"   发现 {len(candidate_files)} 个候选文件，跳过 {len(skipped)} 个")
+    print(f"   Found {len(candidate_files)} candidate file(s), skipped {len(skipped)}")
     return {"file_inventory": inventory}
-
-
-def node_profile(state: GraphState) -> dict:
-    """
-    节点3：能力分析 Agent（V1：规则驱动，无 LLM）
-    在 extract 之后运行，直接从 code_features 推断项目能力。
-    TODO (V2): 接入 LLM 做更丰富的语义分析
-    """
-    print("🔍 [profile] 分析项目能力...")
-
-    profile = analyze_capabilities(
-        file_inventory=state.file_inventory,
-        code_features=state.code_features,
-    )
-
-    print(f"   项目类型: {profile.project_type}")
-    print(f"   敏感能力: {profile.sensitive_capabilities}")
-    print(f"   需要深扫的文件: {len(profile.files_for_deep_scan)} 个")
-
-    return {"project_profile": profile}
 
 
 def node_extract(state: GraphState) -> dict:
     """
-    节点3：代码特征提取
-    使用 AST 扫描器从真实 Python 代码里提取 MCP tools 和危险 sink。
+    Node 2 — Code feature extraction.
+    Runs the AST scanner over Python source files to detect MCP tool
+    registrations and dangerous sinks (shell calls, file access, etc.).
+    Must run before node_profile so that code_features are available.
     """
-    print("⚙️  [extract] 提取代码特征...")
+    print("⚙️  [extract] Extracting code features...")
 
     features = scan_project(
         project_path=state.scan_request.project_path,
         inventory=state.file_inventory,
     )
 
-    print(f"   提取到 {len(features)} 个代码特征")
+    print(f"   Extracted {len(features)} code feature(s)")
     return {"code_features": features}
+
+
+def node_profile(state: GraphState) -> dict:
+    """
+    Node 3 — Capability analysis agent (V1: rule-based, no LLM).
+    Runs after node_extract; infers project type and sensitive capabilities
+    directly from code_features.
+    TODO (V2): add an LLM layer for richer semantic analysis.
+    """
+    print("🔍 [profile] Analysing project capabilities...")
+
+    profile = analyze_capabilities(
+        file_inventory=state.file_inventory,
+        code_features=state.code_features,
+    )
+
+    print(f"   Project type: {profile.project_type}")
+    print(f"   Sensitive capabilities: {profile.sensitive_capabilities}")
+    print(f"   Files flagged for deep scan: {len(profile.files_for_deep_scan)}")
+
+    return {"project_profile": profile}
 
 
 def node_supervisor(state: GraphState) -> dict:
     """
-    节点4：Supervisor，根据 ProjectProfile 决定激活哪些风险扫描 Agent。
+    Node 4 — Supervisor: decide which risk-scan categories to activate.
 
-    映射规则：
-        sensitive_capability → scan category
-        "shell_exec"         → "command_exec"
-        "file_read"          → "file_access"
-        "network"            → "network"
-        "prompt_construction"→ "prompt_injection"
+    Capability → category mapping:
+        "shell_exec"          → "command_exec"
+        "file_read"           → "file_access"
+        "network"             → "network"
+        "prompt_construction" → "prompt_injection"
 
-    prompt_injection 额外规则：只要项目有 MCP tools（用户输入入口），就始终激活，
-    因为任何 MCP tool 都可能存在 prompt injection 风险。
+    Extra rule for prompt_injection: always activate when the project exposes
+    MCP tools, because any tool parameter is a potential injection entry point.
 
-    最终结果与用户在 ScanConfig 里配置的 risk_categories 取交集，
-    确保用户显式关闭的类别不会被激活。
+    The result is intersected with the user's ScanConfig.risk_categories so
+    that explicitly disabled categories are never activated.
     """
-    print("🎯 [supervisor] 决定扫描策略...")
+    print("🎯 [supervisor] Deciding scan strategy...")
 
     _CAP_TO_CATEGORY = {
         "shell_exec":          "command_exec",
@@ -174,92 +177,103 @@ def node_supervisor(state: GraphState) -> dict:
 
     profile = state.project_profile
     if profile is None:
-        # profile 缺失时全部激活，保证 pipeline 不中断
+        # No profile available — activate all categories to avoid missing findings
         active = list(state.scan_request.config.risk_categories)
-        print(f"   ⚠️  无 profile，激活全部类别: {active}")
+        print(f"   ⚠️  No profile found; activating all categories: {active}")
         return {"active_scan_categories": active}
 
     categories: set[str] = set()
 
-    # prompt_injection：只要有 MCP tools 就激活
+    # Always scan for prompt injection when MCP tools are present
     if "tools" in profile.mcp_capabilities:
         categories.add("prompt_injection")
 
-    # 其他类别根据 sensitive_capabilities 推断
+    # Add other categories based on detected sensitive capabilities
     for cap in profile.sensitive_capabilities:
         cat = _CAP_TO_CATEGORY.get(cap)
         if cat:
             categories.add(cat)
 
-    # 与用户配置取交集（用户可以通过 ScanConfig 关闭某些类别）
+    # Intersect with user-requested categories
     requested = set(state.scan_request.config.risk_categories)
     active = sorted(categories & requested)
 
-    print(f"   激活扫描类别: {active}")
+    print(f"   Active scan categories: {active}")
     return {"active_scan_categories": active}
 
 
 def node_scan_command(state: GraphState) -> dict:
     """
-    节点5a：命令执行风险扫描
-    第一版使用确定性规则，之后可加 LLM 解释层。
+    Node 5a — Command-execution risk scan.
+    Skipped if the project has no shell_exec capability (supervisor did not activate it).
+    V1: deterministic rules; V2 may add an LLM explanation layer.
     """
     if "command_exec" not in state.active_scan_categories:
-        print("💣 [scan_command] 跳过（项目无 shell_exec 能力）")
+        print("💣 [scan_command] Skipped (no shell_exec capability detected)")
         return {}
-    print("💣 [scan_command] 扫描命令执行风险...")
+    print("💣 [scan_command] Scanning for command-execution risks...")
 
     findings = scan_command_risks(state.code_features)
-    print(f"   发现 {len(findings)} 条命令执行风险")
+    print(f"   Found {len(findings)} command-execution finding(s)")
 
     return {"risk_findings": state.risk_findings + findings}
 
 
 def node_scan_prompt_injection(state: GraphState) -> dict:
-    """节点5b：Prompt Injection 风险扫描（真实逻辑）"""
+    """
+    Node 5b — Prompt-injection risk scan.
+    Skipped if the project has no MCP tools and no prompt_construction capability.
+    """
     if "prompt_injection" not in state.active_scan_categories:
-        print("💉 [scan_prompt_injection] 跳过（项目无 prompt_construction 能力且无 MCP tools）")
+        print("💉 [scan_prompt_injection] Skipped (no prompt_construction capability or MCP tools)")
         return {}
-    print("💉 [scan_prompt_injection] 扫描 Prompt 注入风险...")
+    print("💉 [scan_prompt_injection] Scanning for prompt-injection risks...")
 
     findings = scan_prompt_injection_risks(state.code_features)
-    print(f"   发现 {len(findings)} 条 Prompt 注入风险")
+    print(f"   Found {len(findings)} prompt-injection finding(s)")
 
     return {"risk_findings": state.risk_findings + findings}
 
 
 def node_scan_file(state: GraphState) -> dict:
-    """节点5c：文件访问风险扫描（真实逻辑）"""
+    """
+    Node 5c — File-access risk scan.
+    Skipped if the project has no file_read capability.
+    """
     if "file_access" not in state.active_scan_categories:
-        print("📂 [scan_file] 跳过（项目无 file_read 能力）")
+        print("📂 [scan_file] Skipped (no file_read capability detected)")
         return {}
-    print("📂 [scan_file] 扫描文件访问风险...")
+    print("📂 [scan_file] Scanning for file-access risks...")
 
     findings = scan_file_risks(state.code_features)
-    print(f"   发现 {len(findings)} 条文件访问风险")
+    print(f"   Found {len(findings)} file-access finding(s)")
 
     return {"risk_findings": state.risk_findings + findings}
 
 
 def node_scan_network(state: GraphState) -> dict:
-    """节点5d：网络 / SSRF 风险扫描（真实逻辑）"""
+    """
+    Node 5d — Network / SSRF risk scan.
+    Skipped if the project has no network capability.
+    """
     if "network" not in state.active_scan_categories:
-        print("🌐 [scan_network] 跳过（项目无 network 能力）")
+        print("🌐 [scan_network] Skipped (no network capability detected)")
         return {}
-    print("🌐 [scan_network] 扫描网络 / SSRF 风险...")
+    print("🌐 [scan_network] Scanning for network / SSRF risks...")
 
     findings = scan_network_risks(state.code_features)
-    print(f"   发现 {len(findings)} 条网络风险")
+    print(f"   Found {len(findings)} network finding(s)")
 
     return {"risk_findings": state.risk_findings + findings}
 
 
 def node_evaluate(state: GraphState) -> dict:
     """
-    节点6：Evaluator — accept / reject / merge / rerun（真实逻辑）
-    不修改任何 evidence 字段，只操作 finding ID 列表。
+    Node 6 — Evaluator: quality gate for all risk findings.
+    Accepts, rejects, or merges findings; may request a rerun for coverage gaps.
+    Never modifies evidence, attack_path, or any other content field.
     """
-    print("✅ [evaluate] 评估风险发现质量...")
+    print("✅ [evaluate] Evaluating finding quality...")
 
     expected = state.scan_request.config.risk_categories if state.scan_request else None
     eval_result = evaluate_findings(state.risk_findings, expected_categories=expected)
@@ -267,9 +281,9 @@ def node_evaluate(state: GraphState) -> dict:
     accepted_count = len(eval_result.accepted_finding_ids)
     rejected_count = len(eval_result.rejected_finding_ids)
     merged_count = len(eval_result.merged_finding_ids)
-    print(f"   接受 {accepted_count} 条 | 拒绝 {rejected_count} 条 | 合并 {merged_count} 条")
+    print(f"   Accepted {accepted_count} | Rejected {rejected_count} | Merged {merged_count}")
     if eval_result.needs_rerun:
-        print(f"   ⚠️  覆盖缺口，申请重跑：{eval_result.rerun_categories}")
+        print(f"   ⚠️  Coverage gap — requesting rerun for: {eval_result.rerun_categories}")
 
     # Filter risk_findings down to only accepted findings
     accepted_set = set(eval_result.accepted_finding_ids)
@@ -283,8 +297,12 @@ def node_evaluate(state: GraphState) -> dict:
 
 
 def node_report(state: GraphState) -> dict:
-    """节点7：生成最终报告（V1：规则驱动，无 LLM）"""
-    print("📄 [report] 生成最终报告...")
+    """
+    Node 7 — Report generation agent (V1: deterministic, no LLM).
+    Assembles accepted findings into a structured Markdown report with
+    severity grouping, action plan, and coverage notes.
+    """
+    print("📄 [report] Generating final report...")
 
     report = generate_report(
         findings=state.risk_findings,
@@ -293,40 +311,38 @@ def node_report(state: GraphState) -> dict:
         scan_request=state.scan_request,
     )
 
-    print(f"   整体风险等级: {report.overall_risk_level.upper()}")
-    print(f"   Action Plan: {len(report.action_plan)} 条任务")
+    print(f"   Overall risk level: {report.overall_risk_level.upper()}")
+    print(f"   Action plan items: {len(report.action_plan)}")
 
     return {"final_report": report}
 
 
 # ══════════════════════════════════════════════
-# 条件路由函数
-# 决定 Evaluator 之后走哪条边
+# Conditional routing
+# Determines which edge to follow after the Evaluator node.
 # ══════════════════════════════════════════════
 
 def route_after_evaluate(state: GraphState) -> str:
     """
-    Evaluator 之后的路由逻辑：
-    - 如果需要重跑 且 还没超过2次 → 回到 supervisor
-    - 否则 → 去生成报告
+    Route after evaluation:
+    - needs_rerun and rerun_count < 2 → back to supervisor for another scan pass
+    - otherwise                        → proceed to report generation
     """
     if state.eval_result and state.eval_result.needs_rerun and state.rerun_count < 2:
-        print(f"🔄 [router] 质量不达标，第 {state.rerun_count + 1} 次重跑...")
+        print(f"🔄 [router] Quality threshold not met — rerun #{state.rerun_count + 1}...")
         return "supervisor"
     return "report"
 
 
 # ══════════════════════════════════════════════
-# 建图
+# Graph assembly
 # ══════════════════════════════════════════════
 
 def build_graph():
-    """
-    把所有节点和边连起来，返回编译好的图
-    """
+    """Wire all nodes and edges together and return the compiled graph."""
     graph = StateGraph(GraphState)
 
-    # 添加节点
+    # Register nodes
     graph.add_node("inventory", node_inventory)
     graph.add_node("profile", node_profile)
     graph.add_node("extract", node_extract)
@@ -338,28 +354,27 @@ def build_graph():
     graph.add_node("evaluate", node_evaluate)
     graph.add_node("report", node_report)
 
-    # 固定边（按照顺序执行，一个agent结束后叫下一个）
-    # 顺序：inventory → extract → profile → supervisor
-    # extract 先跑 AST 扫描，profile 再用 code_features 推断项目能力
+    # Fixed edges: inventory → extract → profile → supervisor
+    # extract runs the AST scan first so code_features are ready for profile
     graph.set_entry_point("inventory")
     graph.add_edge("inventory", "extract")
     graph.add_edge("extract", "profile")
     graph.add_edge("profile", "supervisor")
 
-    # Supervisor → 串行风险扫描（4个 agent 依次执行，结果累积到 risk_findings）
+    # Supervisor → serial risk scans (results accumulate in risk_findings)
     graph.add_edge("supervisor", "scan_command")
     graph.add_edge("scan_command", "scan_prompt_injection")
     graph.add_edge("scan_prompt_injection", "scan_file")
     graph.add_edge("scan_file", "scan_network")
     graph.add_edge("scan_network", "evaluate")
 
-    # Evaluator 之后：条件路由
+    # Conditional edge after evaluation
     graph.add_conditional_edges(
         "evaluate",
         route_after_evaluate,
         {
-            "supervisor": "supervisor",  # 重跑
-            "report": "report",          # 继续
+            "supervisor": "supervisor",  # rerun
+            "report": "report",          # proceed
         }
     )
 
@@ -368,22 +383,22 @@ def build_graph():
     return graph.compile()
 
 
-# 编译好的图，供外部调用
+# Compiled graph — imported by other modules and the CLI
 app = build_graph()
 
 
 # ══════════════════════════════════════════════
-# 快速测试入口
+# Quick smoke-test entry point
 # ══════════════════════════════════════════════
 
 if __name__ == "__main__":
     from mcp_security_agent.schemas import ScanRequest, ScanConfig
 
     print("=" * 50)
-    print("🚀 MCP Security Analysis — 骨架测试")
+    print("🚀 MCP Security Analysis — pipeline test")
     print("=" * 50)
 
-    # 用当前目录作为测试目标
+    # Scan the project itself as the test target
     import os
     test_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -398,11 +413,11 @@ if __name__ == "__main__":
 
     print()
     print("=" * 50)
-    print("✅ 流程跑通！最终报告：")
+    print("✅ Pipeline complete — final report:")
     print("=" * 50)
     if result["final_report"]:
         print(result["final_report"].report_markdown)
         os.makedirs("results", exist_ok=True)
         with open("results/report.md", "w") as f:
             f.write(result["final_report"].report_markdown)
-        print("📄 报告已保存到 results/report.md")
+        print("📄 Report saved to results/report.md")
