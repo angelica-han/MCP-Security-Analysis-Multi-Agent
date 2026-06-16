@@ -22,8 +22,7 @@ class ScanConfig(BaseModel):
         default_factory=lambda: ["node_modules", ".venv", "dist", "__pycache__", ".git"]
     )
     risk_categories: list[str] = Field(
-        # "lifecycle" omitted until risk_lifecycle.py agent is built
-        default_factory=lambda: ["prompt_injection", "command_exec", "file_access", "network"]
+        default_factory=lambda: ["prompt_injection", "command_exec", "file_access", "network", "lifecycle"]
     )
     max_files: int = 100
     report_format: Literal["markdown", "json", "both"] = "markdown"

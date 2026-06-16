@@ -127,6 +127,10 @@ def evaluate_findings(
     accepted_ids = [f.finding_id for f in surviving]
 
     # ── Step 4: check coverage gaps ──
+    # Low-signal categories are excluded from rerun logic because finding nothing
+    # is a legitimate outcome (not a scan failure worth retrying).
+    _NO_RERUN_CATEGORIES = {"lifecycle"}
+
     if expected_categories:
         found_types = {f.risk_type for f in surviving}
         # Map category names (from ScanConfig) to risk_type values in RiskFinding
@@ -138,6 +142,8 @@ def evaluate_findings(
             "lifecycle": "lifecycle_leak",
         }
         for cat in expected_categories:
+            if cat in _NO_RERUN_CATEGORIES:
+                continue
             rt = category_to_type.get(cat)
             if rt and rt not in found_types:
                 rerun_categories.append(cat)

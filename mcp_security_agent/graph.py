@@ -16,6 +16,7 @@ Pipeline:
   [scan_prompt_injection]  Prompt-injection risk scan
   [scan_file]              File-access risk scan
   [scan_network]           Network / SSRF risk scan
+  [scan_lifecycle]         Lifecycle risk scan (cleanup, log leakage, session state)
       ↓
   [evaluate]               Quality gate: accept / reject / merge / rerun
       ↓        ↘ needs_rerun → back to supervisor (max 2 times)
@@ -33,6 +34,7 @@ from mcp_security_agent.agents.risk_command import scan_command_risks
 from mcp_security_agent.agents.risk_prompt_injection import scan_prompt_injection_risks
 from mcp_security_agent.agents.risk_file import scan_file_risks
 from mcp_security_agent.agents.risk_network import scan_network_risks
+from mcp_security_agent.agents.risk_lifecycle import scan_lifecycle_risks
 from mcp_security_agent.agents.evaluator import evaluate_findings
 from mcp_security_agent.schemas import (
     GraphState,
@@ -188,6 +190,11 @@ def node_supervisor(state: GraphState) -> dict:
     if "tools" in profile.mcp_capabilities:
         categories.add("prompt_injection")
 
+    # Always scan lifecycle when the project exposes MCP tools or accesses files —
+    # both create state/resource management obligations
+    if "tools" in profile.mcp_capabilities or "file_read" in profile.sensitive_capabilities:
+        categories.add("lifecycle")
+
     # Add other categories based on detected sensitive capabilities
     for cap in profile.sensitive_capabilities:
         cat = _CAP_TO_CATEGORY.get(cap)
@@ -263,6 +270,23 @@ def node_scan_network(state: GraphState) -> dict:
 
     findings = scan_network_risks(state.code_features)
     print(f"   Found {len(findings)} network finding(s)")
+
+    return {"risk_findings": state.risk_findings + findings}
+
+
+def node_scan_lifecycle(state: GraphState) -> dict:
+    """
+    Node 5e — Lifecycle risk scan.
+    Checks for incomplete file cleanup, log leakage, and shared session state.
+    Skipped if "lifecycle" is not in active_scan_categories.
+    """
+    if "lifecycle" not in state.active_scan_categories:
+        print("♻️  [scan_lifecycle] Skipped (lifecycle category not enabled)")
+        return {}
+    print("♻️  [scan_lifecycle] Scanning for lifecycle risks...")
+
+    findings = scan_lifecycle_risks(state.code_features)
+    print(f"   Found {len(findings)} lifecycle finding(s)")
 
     return {"risk_findings": state.risk_findings + findings}
 
@@ -351,6 +375,7 @@ def build_graph():
     graph.add_node("scan_prompt_injection", node_scan_prompt_injection)
     graph.add_node("scan_file", node_scan_file)
     graph.add_node("scan_network", node_scan_network)
+    graph.add_node("scan_lifecycle", node_scan_lifecycle)
     graph.add_node("evaluate", node_evaluate)
     graph.add_node("report", node_report)
 
@@ -366,7 +391,8 @@ def build_graph():
     graph.add_edge("scan_command", "scan_prompt_injection")
     graph.add_edge("scan_prompt_injection", "scan_file")
     graph.add_edge("scan_file", "scan_network")
-    graph.add_edge("scan_network", "evaluate")
+    graph.add_edge("scan_network", "scan_lifecycle")
+    graph.add_edge("scan_lifecycle", "evaluate")
 
     # Conditional edge after evaluation
     graph.add_conditional_edges(
