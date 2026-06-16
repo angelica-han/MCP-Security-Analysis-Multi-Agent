@@ -28,6 +28,7 @@ import os
 from langgraph.graph import StateGraph, END
 
 from mcp_security_agent.agents.functional import analyze_capabilities
+from mcp_security_agent.agents.reporter import generate_report
 from mcp_security_agent.agents.risk_command import scan_command_risks
 from mcp_security_agent.agents.risk_prompt_injection import scan_prompt_injection_risks
 from mcp_security_agent.agents.risk_file import scan_file_risks
@@ -147,12 +148,55 @@ def node_extract(state: GraphState) -> dict:
 
 def node_supervisor(state: GraphState) -> dict:
     """
-    节点4：Supervisor，决定要跑哪些风险扫描 Agent
-    现在直接返回空，路由逻辑在 edge 里控制
+    节点4：Supervisor，根据 ProjectProfile 决定激活哪些风险扫描 Agent。
+
+    映射规则：
+        sensitive_capability → scan category
+        "shell_exec"         → "command_exec"
+        "file_read"          → "file_access"
+        "network"            → "network"
+        "prompt_construction"→ "prompt_injection"
+
+    prompt_injection 额外规则：只要项目有 MCP tools（用户输入入口），就始终激活，
+    因为任何 MCP tool 都可能存在 prompt injection 风险。
+
+    最终结果与用户在 ScanConfig 里配置的 risk_categories 取交集，
+    确保用户显式关闭的类别不会被激活。
     """
     print("🎯 [supervisor] 决定扫描策略...")
-    # Supervisor 本身不修改 state，只是一个路由决策点
-    return {}
+
+    _CAP_TO_CATEGORY = {
+        "shell_exec":          "command_exec",
+        "file_read":           "file_access",
+        "network":             "network",
+        "prompt_construction": "prompt_injection",
+    }
+
+    profile = state.project_profile
+    if profile is None:
+        # profile 缺失时全部激活，保证 pipeline 不中断
+        active = list(state.scan_request.config.risk_categories)
+        print(f"   ⚠️  无 profile，激活全部类别: {active}")
+        return {"active_scan_categories": active}
+
+    categories: set[str] = set()
+
+    # prompt_injection：只要有 MCP tools 就激活
+    if "tools" in profile.mcp_capabilities:
+        categories.add("prompt_injection")
+
+    # 其他类别根据 sensitive_capabilities 推断
+    for cap in profile.sensitive_capabilities:
+        cat = _CAP_TO_CATEGORY.get(cap)
+        if cat:
+            categories.add(cat)
+
+    # 与用户配置取交集（用户可以通过 ScanConfig 关闭某些类别）
+    requested = set(state.scan_request.config.risk_categories)
+    active = sorted(categories & requested)
+
+    print(f"   激活扫描类别: {active}")
+    return {"active_scan_categories": active}
 
 
 def node_scan_command(state: GraphState) -> dict:
@@ -160,6 +204,9 @@ def node_scan_command(state: GraphState) -> dict:
     节点5a：命令执行风险扫描
     第一版使用确定性规则，之后可加 LLM 解释层。
     """
+    if "command_exec" not in state.active_scan_categories:
+        print("💣 [scan_command] 跳过（项目无 shell_exec 能力）")
+        return {}
     print("💣 [scan_command] 扫描命令执行风险...")
 
     findings = scan_command_risks(state.code_features)
@@ -170,6 +217,9 @@ def node_scan_command(state: GraphState) -> dict:
 
 def node_scan_prompt_injection(state: GraphState) -> dict:
     """节点5b：Prompt Injection 风险扫描（真实逻辑）"""
+    if "prompt_injection" not in state.active_scan_categories:
+        print("💉 [scan_prompt_injection] 跳过（项目无 prompt_construction 能力且无 MCP tools）")
+        return {}
     print("💉 [scan_prompt_injection] 扫描 Prompt 注入风险...")
 
     findings = scan_prompt_injection_risks(state.code_features)
@@ -180,6 +230,9 @@ def node_scan_prompt_injection(state: GraphState) -> dict:
 
 def node_scan_file(state: GraphState) -> dict:
     """节点5c：文件访问风险扫描（真实逻辑）"""
+    if "file_access" not in state.active_scan_categories:
+        print("📂 [scan_file] 跳过（项目无 file_read 能力）")
+        return {}
     print("📂 [scan_file] 扫描文件访问风险...")
 
     findings = scan_file_risks(state.code_features)
@@ -190,6 +243,9 @@ def node_scan_file(state: GraphState) -> dict:
 
 def node_scan_network(state: GraphState) -> dict:
     """节点5d：网络 / SSRF 风险扫描（真实逻辑）"""
+    if "network" not in state.active_scan_categories:
+        print("🌐 [scan_network] 跳过（项目无 network 能力）")
+        return {}
     print("🌐 [scan_network] 扫描网络 / SSRF 风险...")
 
     findings = scan_network_risks(state.code_features)
@@ -227,56 +283,18 @@ def node_evaluate(state: GraphState) -> dict:
 
 
 def node_report(state: GraphState) -> dict:
-    """
-    节点7：生成最终报告（占位）
-    TODO: 替换成真正的 Reporter Agent
-    """
-    print("📄 [report] 生成最终报告（占位）...")
+    """节点7：生成最终报告（V1：规则驱动，无 LLM）"""
+    print("📄 [report] 生成最终报告...")
 
-    findings = state.risk_findings
-    risk_summary = state.eval_result.risk_summary if state.eval_result else {}
-
-    overall_level = "safe"
-    if risk_summary.get("critical", 0) > 0:
-        overall_level = "critical"
-    elif risk_summary.get("high", 0) > 0:
-        overall_level = "high"
-    elif risk_summary.get("medium", 0) > 0:
-        overall_level = "medium"
-    elif risk_summary.get("low", 0) > 0:
-        overall_level = "low"
-
-    # 生成简单的 Markdown 报告
-    md_lines = [
-        f"# MCP 安全分析报告",
-        f"",
-        f"**项目路径：** `{state.scan_request.project_path}`",
-        f"**整体风险等级：** {overall_level.upper()}",
-        f"",
-        f"## 执行摘要",
-        f"共发现 {len(findings)} 条风险（占位报告）。",
-        f"",
-        f"## 风险详情",
-    ]
-    for f in findings:
-        md_lines += [
-            f"### [{f.severity.upper()}] {f.risk_type}",
-            f"- **文件：** `{f.file_path}` 第 {f.line_range[0]}~{f.line_range[1]} 行",
-            f"- **证据：** `{f.evidence}`",
-            f"- **攻击路径：** {f.attack_path}",
-            f"- **修复建议：** {f.remediation}",
-            f"",
-        ]
-
-    report = FinalReport(
-        project_path=state.scan_request.project_path,
-        overall_risk_level=overall_level,
-        executive_summary=f"发现 {len(findings)} 条风险，最高等级 {overall_level}。",
-        accepted_findings=findings,
-        coverage_notes="占位扫描：仅运行了命令执行风险扫描。",
-        action_plan=[f"[P0] 修复 {f.file_path} 中的 {f.risk_type} 问题" for f in findings if f.severity in ("critical", "high")],
-        report_markdown="\n".join(md_lines),
+    report = generate_report(
+        findings=state.risk_findings,
+        project_profile=state.project_profile,
+        eval_result=state.eval_result,
+        scan_request=state.scan_request,
     )
+
+    print(f"   整体风险等级: {report.overall_risk_level.upper()}")
+    print(f"   Action Plan: {len(report.action_plan)} 条任务")
 
     return {"final_report": report}
 

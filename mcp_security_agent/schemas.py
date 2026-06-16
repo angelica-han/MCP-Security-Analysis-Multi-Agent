@@ -207,4 +207,9 @@ class GraphState(BaseModel):
 
     # 流程控制
     rerun_count: int = 0                    # 已经重跑了几次（防止无限循环）
+    active_scan_categories: list[str] = Field(
+        # Supervisor 会根据 ProjectProfile 覆盖这个值；
+        # 默认全开，保证在 profile 缺失时仍能正常运行。
+        default_factory=lambda: ["prompt_injection", "command_exec", "file_access", "network"]
+    )
     error_message: Optional[str] = None
