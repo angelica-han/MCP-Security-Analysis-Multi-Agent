@@ -456,6 +456,18 @@ if __name__ == "__main__":
     if result["final_report"]:
         print(result["final_report"].report_markdown)
         os.makedirs("results", exist_ok=True)
-        with open("results/report.md", "w") as f:
+
+        # Timestamped filename so every run is preserved — this keeps the full
+        # iteration history (e.g. before/after adding the LLM evaluator) instead
+        # of overwriting it. results/ is gitignored, so these don't clutter git.
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        report_path = f"results/report_{stamp}.md"
+        with open(report_path, "w") as f:
             f.write(result["final_report"].report_markdown)
-        print("📄 Report saved to results/report.md")
+
+        # Also refresh a stable "latest" copy for convenience.
+        with open("results/report_latest.md", "w") as f:
+            f.write(result["final_report"].report_markdown)
+
+        print(f"📄 Report saved to {report_path}  (latest: results/report_latest.md)")

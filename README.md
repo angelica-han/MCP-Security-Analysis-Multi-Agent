@@ -69,8 +69,6 @@ pip install -r requirements.txt
 python3 -m mcp_security_agent.graph
 ```
 
-The report is written to `results/report.md`.
-
 **The LLM layer is optional.** With no key configured, the entire pipeline runs on deterministic static analysis (AST + regex) and the executive summary falls back to a rule-based template — nothing breaks.
 
 To enable the LLM-polished executive summary, copy `.env.example` to `.env`, add a key for one provider, and set `LLM_MODEL`:
