@@ -300,12 +300,24 @@ def node_evaluate(state: GraphState) -> dict:
     print("✅ [evaluate] Evaluating finding quality...")
 
     expected = state.scan_request.config.risk_categories if state.scan_request else None
-    eval_result = evaluate_findings(state.risk_findings, expected_categories=expected)
+    project_path = state.scan_request.project_path if state.scan_request else None
+    eval_result = evaluate_findings(
+        state.risk_findings,
+        expected_categories=expected,
+        project_path=project_path,
+    )
 
     accepted_count = len(eval_result.accepted_finding_ids)
     rejected_count = len(eval_result.rejected_finding_ids)
     merged_count = len(eval_result.merged_finding_ids)
     print(f"   Accepted {accepted_count} | Rejected {rejected_count} | Merged {merged_count}")
+    if eval_result.llm_rejudged_count:
+        print(f"   🤖 LLM re-judged {eval_result.llm_rejudged_count} low-confidence finding(s):")
+        for d in eval_result.divergence_by_type:
+            print(
+                f"      {d.risk_type}: {d.rejudged_count} re-judged, "
+                f"{d.likely_false_positives} likely false positive(s), mean Δ {d.mean_abs_delta}"
+            )
     if eval_result.needs_rerun:
         print(f"   ⚠️  Coverage gap — requesting rerun for: {eval_result.rerun_categories}")
 

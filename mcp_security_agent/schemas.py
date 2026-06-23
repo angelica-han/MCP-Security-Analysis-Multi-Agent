@@ -129,7 +129,8 @@ class RiskFinding(BaseModel):
         "lifecycle_leak"
     ]
     severity: Literal["critical", "high", "medium", "low"]
-    confidence: float = Field(ge=0.0, le=1.0)   # Confidence score; below 0.55 triggers rejection
+    confidence: float = Field(ge=0.0, le=1.0)   # Effective score; below 0.55 triggers rejection.
+                                                # After LLM re-judgment this holds the LLM's score.
     file_path: str
     line_range: tuple[int, int]
     evidence: str                               # Verbatim code snippet — must be real
@@ -139,10 +140,36 @@ class RiskFinding(BaseModel):
     false_positive_notes: str = ""
     source_feature_id: Optional[str] = None    # ID of the CodeFeature that triggered this finding
 
+    # ── LLM second-opinion fields ──
+    # Set only when the LLM evaluator re-judges a low-confidence finding.
+    # The LLM judges the source code BLIND — it never sees the agent's score or
+    # reasoning — so agent_confidence vs llm_confidence is a meaningful divergence.
+    agent_confidence: Optional[float] = None   # original hard-coded score, preserved for analysis
+    llm_confidence: Optional[float] = None      # independent blind re-judgment (None = not re-judged)
+    llm_rationale: str = ""                      # one-line reason from the LLM
+
 
 # ─────────────────────────────────────────────
 # 6. Evaluator quality-gate result
 # ─────────────────────────────────────────────
+
+class AgentDivergence(BaseModel):
+    """
+    Per-risk_type comparison of agent confidence vs the LLM's blind re-judgment,
+    over the findings the LLM evaluator actually re-scored.
+
+    A large divergence means the agent's hard-coded scoring disagrees with an
+    independent LLM read of the same code — a signal that this agent (e.g.
+    prompt_injection, which only keyword-matches) is a candidate for its own
+    LLM upgrade. Consumed later by the reporter to suggest agent improvements.
+    """
+    risk_type: str
+    rejudged_count: int = 0           # findings of this type the LLM re-scored
+    over_0_2: int = 0                 # |agent_conf - llm_conf| > 0.2
+    over_0_3: int = 0                 # |agent_conf - llm_conf| > 0.3
+    likely_false_positives: int = 0   # agent scored it plausible but LLM scored it low
+    mean_abs_delta: float = 0.0       # average |agent_conf - llm_conf|
+
 
 class EvalResult(BaseModel):
     """
@@ -169,6 +196,10 @@ class EvalResult(BaseModel):
     merged_finding_ids: list[str] = Field(default_factory=list)   # IDs folded into a surviving finding
     risk_summary: dict[str, int] = Field(default_factory=dict)   # e.g. {"critical": 1, "high": 2}
     evaluator_notes: str = ""
+
+    # ── LLM second-opinion summary ──
+    llm_rejudged_count: int = 0                                   # total findings re-scored by the LLM
+    divergence_by_type: list[AgentDivergence] = Field(default_factory=list)
 
 
 # ─────────────────────────────────────────────

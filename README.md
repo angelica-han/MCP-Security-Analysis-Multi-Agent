@@ -12,7 +12,7 @@ Point it at any MCP server/client project directory, and it will:
 2. **Profile the project** — understand what MCP capabilities it exposes and where the trust boundaries are
 3. **Extract code features** — use static analysis (AST + regex) to find dangerous patterns like shell calls, file access, and network requests
 4. **Run risk agents** — five specialized agents scan for different vulnerability classes (prompt injection, command execution, file access, network/SSRF, lifecycle)
-5. **Evaluate quality** — an Evaluator checks that every finding has real evidence; low-confidence findings get flagged or sent back for re-scan
+5. **Evaluate quality** — an Evaluator checks that every finding has real evidence and merges duplicates; low-confidence findings get a blind LLM second opinion (an independent re-read of the source code) and are rescued or demoted accordingly
 6. **Generate a report** — structured Markdown + JSON output with evidence chains, attack paths, and remediation suggestions
 
 ## Risk Categories
@@ -48,6 +48,7 @@ mcp_security_agent/
 │   ├── risk_network.py
 │   ├── risk_lifecycle.py
 │   ├── evaluator.py
+│   ├── llm_evaluator.py        # Blind LLM second opinion on low-confidence findings
 │   └── reporter.py
 └── tools/
     ├── file_inventory.py   # Directory walker and file filter
@@ -101,7 +102,7 @@ Switching providers (OpenAI / Anthropic / Google) is a one-line change to `LLM_M
 | **LLM integration** | |
 | Shared LLM access layer (`llm.py`) | ✅ Done — `init_chat_model`, env-driven model selection, graceful no-key fallback |
 | LLM layer: reporter | ✅ Done (executive summary) — LLM-polished prose grounded in computed facts, deterministic fallback; action-plan / per-finding narrative still planned |
-| LLM layer: evaluator | ⏳ Planned — second-opinion confidence on low-confidence findings |
+| LLM layer: evaluator | ✅ Done — blind second-opinion on low-confidence findings (re-judges source code independently of the agent's score); records agent-vs-LLM divergence per risk type; deterministic fallback |
 | LLM layer: prompt injection agent | ⏳ Planned — semantic taint analysis to replace string matching |
 | LLM layer: capability analysis | ⏳ Planned — richer trust boundary descriptions; JS/TS support |
 
