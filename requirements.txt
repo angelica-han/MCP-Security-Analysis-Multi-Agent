@@ -1,2 +1,9 @@
 langgraph
 pydantic
+
+# LLM access layer (reporter / evaluator)
+langchain>=0.3
+langchain-anthropic
+langchain-openai
+langchain-google-genai
+python-dotenv

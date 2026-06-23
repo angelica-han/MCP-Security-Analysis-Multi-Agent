@@ -1,5 +1,5 @@
 """
-reporter.py — Report Generation Agent (V1: deterministic, no LLM)
+reporter.py — Report Generation Agent
 
 Assembles the final security report from accepted RiskFindings, ProjectProfile,
 and EvalResult. Every claim in the report traces back to a finding field —
@@ -11,14 +11,20 @@ Sections produced:
     3. Action Plan         — P0 / P1 / P2 prioritised remediation tasks
     4. Coverage Notes      — what was scanned, skipped, confidence caveats
 
-TODO (V2): wrap executive_summary and action_plan with an LLM layer for
-richer natural-language narrative.
+LLM layer (current): the Executive Summary is polished by an LLM that is given
+ONLY the pre-computed facts (counts, severities, risk surfaces) — it rephrases,
+it does not analyse code or invent findings. If no API key is configured or the
+call fails, a deterministic summary is used instead, so the pipeline always runs.
+
+TODO (next): extend the LLM layer to the action plan / per-finding narrative.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
+from mcp_security_agent.llm import get_llm
 from mcp_security_agent.schemas import (
     EvalResult,
     FinalReport,
@@ -52,6 +58,7 @@ def generate_report(
     project_profile: ProjectProfile | None,
     eval_result: EvalResult | None,
     scan_request: ScanRequest,
+    use_llm: bool = True,
 ) -> FinalReport:
     """
     Build a FinalReport from accepted findings and pipeline metadata.
@@ -66,17 +73,29 @@ def generate_report(
         Evaluator output; used for confidence score and coverage gap notes.
     scan_request:
         Original scan request; used for project path and config metadata.
+    use_llm:
+        If True (default), polish the executive summary with an LLM. Set False
+        to force the deterministic summary (useful for tests / reproducibility).
     """
 
     # ── 1. Overall risk level ────────────────────────────────────────────────
     overall_risk_level = _compute_risk_level(findings)
 
     # ── 2. Executive summary ─────────────────────────────────────────────────
+    # The deterministic summary is always built first: it is both the zero-key
+    # output and the fallback if the LLM is unavailable or the call fails.
     executive_summary = _build_executive_summary(
         findings=findings,
         overall_risk_level=overall_risk_level,
         project_profile=project_profile,
     )
+    if use_llm:
+        executive_summary = _llm_executive_summary(
+            findings=findings,
+            overall_risk_level=overall_risk_level,
+            project_profile=project_profile,
+            fallback=executive_summary,
+        )
 
     # ── 3. Action plan (P0 / P1 / P2) ───────────────────────────────────────
     action_plan = _build_action_plan(findings)
@@ -111,6 +130,66 @@ def generate_report(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _llm_executive_summary(
+    findings: list[RiskFinding],
+    overall_risk_level: str,
+    project_profile: ProjectProfile | None,
+    fallback: str,
+) -> str:
+    """
+    Polish the executive summary with an LLM, grounded strictly in pre-computed facts.
+
+    The LLM is handed ONLY a small JSON of facts (counts, severities, risk
+    surfaces, capabilities) — it never sees raw source code, so it cannot invent
+    findings, file names, or numbers. If the LLM is unavailable (no key / missing
+    package) or the call fails for any reason, the deterministic `fallback` is
+    returned, so the pipeline never breaks.
+    """
+    llm = get_llm()
+    if llm is None:
+        return fallback
+
+    # Same facts the deterministic builder relies on — nothing more.
+    counts: dict[str, int] = {}
+    for f in findings:
+        counts[f.severity] = counts.get(f.severity, 0) + 1
+
+    facts = {
+        "overall_risk_level": overall_risk_level,
+        "total_findings": len(findings),
+        "finding_counts_by_severity": counts,
+        "risk_surfaces": sorted({f.risk_type for f in findings}),
+        "project_type": project_profile.project_type if project_profile else None,
+        "sensitive_capabilities": (
+            project_profile.sensitive_capabilities if project_profile else []
+        ),
+    }
+
+    system = (
+        "You write the executive summary for an automated MCP security scan report. "
+        "Write 2-4 sentences of plain prose: no markdown, no headings, no bullet lists. "
+        "Use ONLY the facts in the JSON provided. Do NOT invent findings, file names, "
+        "numbers, or risks that are absent from the data. Keep the tone consistent with "
+        "overall_risk_level — never downplay a critical or high result."
+    )
+    human = (
+        "Facts (JSON):\n"
+        f"{json.dumps(facts, indent=2)}\n\n"
+        "Write the executive summary now."
+    )
+
+    try:
+        resp = llm.invoke([("system", system), ("human", human)])
+        text = (getattr(resp, "content", "") or "").strip()
+        # Guard against an empty or runaway response; fall back if either.
+        if not text or len(text) > 1500:
+            return fallback
+        return text
+    except Exception:
+        # Network error, bad key, quota exceeded — fall back to deterministic prose.
+        return fallback
+
 
 def _compute_risk_level(findings: list[RiskFinding]) -> str:
     if not findings:

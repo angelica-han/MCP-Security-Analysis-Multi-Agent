@@ -11,7 +11,7 @@ Point it at any MCP server/client project directory, and it will:
 1. **Scan the directory** — inventory all source files and filter out noise
 2. **Profile the project** — understand what MCP capabilities it exposes and where the trust boundaries are
 3. **Extract code features** — use static analysis (AST + regex) to find dangerous patterns like shell calls, file access, and network requests
-4. **Run risk agents** — specialized agents scan for different vulnerability classes in parallel (four live today, a fifth planned)
+4. **Run risk agents** — five specialized agents scan for different vulnerability classes (prompt injection, command execution, file access, network/SSRF, lifecycle)
 5. **Evaluate quality** — an Evaluator checks that every finding has real evidence; low-confidence findings get flagged or sent back for re-scan
 6. **Generate a report** — structured Markdown + JSON output with evidence chains, attack paths, and remediation suggestions
 
@@ -23,14 +23,14 @@ Point it at any MCP server/client project directory, and it will:
 | Command Execution | `shell=True`, command concatenation, unvalidated parameters |
 | File Access | Path traversal, sensitive directory reads, missing allowlists |
 | Network Request | SSRF, arbitrary URLs, internal network access |
-| Lifecycle *(planned)* | Session state leakage, incomplete cleanup, log leakage |
+| Lifecycle | Session state leakage, incomplete cleanup, log leakage |
 
 ## Tech Stack
 
 - **LangGraph** — multi-agent orchestration (StateGraph, conditional routing, feedback loops)
 - **Pydantic** — typed schemas for all inter-agent data; prevents hallucinated evidence
 - **Python AST module** — deterministic code feature extraction (no LLM guessing)
-- **LangChain / LLM layer** *(V2)* — semantic interpretation for capability analysis, supervisor routing, and report generation; all V1 agents are deterministic rule-based
+- **LangChain LLM layer** — a pluggable chat model via `init_chat_model` (OpenAI / Anthropic / Google, switchable from `.env`). Currently polishes the report's **executive summary** into natural-language prose, grounded strictly in pre-computed facts, with a deterministic fallback when no key is configured. Risk scanning itself stays fully deterministic (AST + regex).
 
 ## Project Structure
 
@@ -38,6 +38,7 @@ Point it at any MCP server/client project directory, and it will:
 mcp_security_agent/
 ├── schemas.py          # All data structures (GraphState, RiskFinding, etc.)
 ├── graph.py            # LangGraph graph: nodes, edges, conditional routing
+├── llm.py              # Shared LLM access layer (init_chat_model, .env, no-key fallback)
 ├── cli.py              # Command-line entry point
 ├── agents/
 │   ├── functional.py           # Capability analysis agent
@@ -61,13 +62,24 @@ tests/fixtures/         # Test fixtures
 
 ```bash
 # Install dependencies
-pip install langgraph pydantic
+pip install -r requirements.txt
 
 # Run the full pipeline against the sample vulnerable server
-python -m mcp_security_agent.graph
+python3 -m mcp_security_agent.graph
 ```
 
-No API key needed yet — the current risk agents use deterministic static analysis (AST + regex), not LLM calls. The report is written to `results/`.
+The report is written to `results/report.md`.
+
+**The LLM layer is optional.** With no key configured, the entire pipeline runs on deterministic static analysis (AST + regex) and the executive summary falls back to a rule-based template — nothing breaks.
+
+To enable the LLM-polished executive summary, copy `.env.example` to `.env`, add a key for one provider, and set `LLM_MODEL`:
+
+```dotenv
+OPENAI_API_KEY=sk-...
+LLM_MODEL=openai:gpt-4o-mini
+```
+
+Switching providers (OpenAI / Anthropic / Google) is a one-line change to `LLM_MODEL`. `.env` is gitignored — keys never enter the repo.
 
 ## Current Status
 
@@ -83,9 +95,15 @@ No API key needed yet — the current risk agents use deterministic static analy
 | Supervisor routing | ✅ Done — activates only relevant scan categories based on detected capabilities |
 | Evaluator agent | ✅ Done — confidence threshold, proximity-based dedup, coverage gap detection, rerun loop |
 | Reporter agent | ✅ Done — structured Markdown with severity grouping, action plan (P0/P1/P2), coverage notes |
-| Risk agent: lifecycle | ⏳ Planned — session state leakage, incomplete cleanup, log leakage |
+| Risk agent: lifecycle | ✅ Done — incomplete cleanup, log leakage, session state detection |
 | Regex scanner (JS/TS targets) | ⏳ Planned |
 | CLI entry point | ⏳ Planned |
+| **LLM integration** | |
+| Shared LLM access layer (`llm.py`) | ✅ Done — `init_chat_model`, env-driven model selection, graceful no-key fallback |
+| LLM layer: reporter | ✅ Done (executive summary) — LLM-polished prose grounded in computed facts, deterministic fallback; action-plan / per-finding narrative still planned |
+| LLM layer: evaluator | ⏳ Planned — second-opinion confidence on low-confidence findings |
+| LLM layer: prompt injection agent | ⏳ Planned — semantic taint analysis to replace string matching |
+| LLM layer: capability analysis | ⏳ Planned — richer trust boundary descriptions; JS/TS support |
 
 ## Design Principles
 
