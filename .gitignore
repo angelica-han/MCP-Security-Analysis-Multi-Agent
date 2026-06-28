@@ -3,3 +3,7 @@ results/
 **/__pycache__/
 .Rhistory
 .env
+
+# Generated test fixtures — reproduce with: python scripts/generate_labeled_fixtures.py
+tests/fixtures/labeled_cases/
+tests/fixtures/labels.jsonl
