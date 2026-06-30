@@ -30,7 +30,7 @@ Point it at any MCP server/client project directory, and it will:
 - **LangGraph** — multi-agent orchestration (StateGraph, conditional routing, feedback loops)
 - **Pydantic** — typed schemas for all inter-agent data; prevents hallucinated evidence
 - **Python AST module** — deterministic code feature extraction (no LLM guessing)
-- **LangChain LLM layer** — a pluggable chat model via `init_chat_model` (OpenAI / Anthropic / Google, switchable from `.env`). Currently polishes the report's **executive summary** into natural-language prose, grounded strictly in pre-computed facts, with a deterministic fallback when no key is configured. Risk scanning itself stays fully deterministic (AST + regex).
+- **LangChain LLM layer** — a pluggable chat model via `init_chat_model` (OpenAI / Anthropic / Google, switchable from `.env`). Used in three places: the reporter's **executive summary**, the evaluator's **blind second opinion** on low-confidence findings, and the **prompt-injection agent's** semantic judgment (does untrusted input really reach a prompt?). Every use is grounded in real code/facts and falls back to deterministic logic when no key is configured. The other risk scanners (command / file / network / lifecycle) stay fully deterministic (AST + regex).
 
 ## Project Structure
 
@@ -101,7 +101,7 @@ Switching providers (OpenAI / Anthropic / Google) is a one-line change to `LLM_M
 | Shared LLM access layer (`llm.py`) | ✅ Done — `init_chat_model`, env-driven model selection, graceful no-key fallback |
 | LLM layer: reporter | ✅ Done (executive summary) — LLM-polished prose grounded in computed facts, deterministic fallback; action-plan / per-finding narrative still planned |
 | LLM layer: evaluator | ✅ Done — blind second-opinion on low-confidence findings (re-judges source code independently of the agent's score); records agent-vs-LLM divergence per risk type; deterministic fallback |
-| LLM layer: prompt injection agent | ⏳ Planned — semantic taint analysis to replace string matching |
+| LLM layer: prompt injection agent | ✅ Done — LLM reads the tool's full source and judges whether untrusted input really reaches a prompt, replacing the brittle param-name regex; clears false positives (allowlisted / reassigned / not-a-prompt cases) while keeping the same inputs, output shape, and pipeline position; deterministic regex fallback when no key is configured |
 | LLM layer: capability analysis | ⏳ Planned — richer trust boundary descriptions; JS/TS support |
 
 ## Design Principles
