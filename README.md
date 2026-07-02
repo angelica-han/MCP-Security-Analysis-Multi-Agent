@@ -54,9 +54,13 @@ mcp_security_agent/
     ├── file_inventory.py   # Directory walker and file filter
     ├── ast_scanner.py      # Python AST-based feature extraction
     └── regex_scanner.py    # Pattern matching for JS/TS and config files
-results/                # Output reports land here (gitignored)
+scripts/
+├── generate_labeled_fixtures.py  # Regenerates the labeled eval cases (source of truth)
+├── hard_negative_cases.py        # 7 hard negatives: look dangerous but actually safe
+└── eval_harness.py               # Runs every labeled case, grades against ground truth
+results/                # Output reports + eval JSONs land here (gitignored)
 sample_mcp_server/      # Deliberately vulnerable MCP server used as scan target
-tests/fixtures/         # Test fixtures
+tests/fixtures/         # Generated labeled cases (gitignored — rebuild via the script)
 ```
 
 ## Quickstart
@@ -80,6 +84,43 @@ LLM_MODEL=openai:gpt-4o-mini
 
 Switching providers (OpenAI / Anthropic / Google) is a one-line change to `LLM_MODEL`. `.env` is gitignored — keys never enter the repo.
 
+## Evaluation
+
+The system is measured against 16 labeled fixture cases with ground truth
+(`tests/fixtures/labels.jsonl`): 8 positive cases (one typical vulnerability
+per risk class) and 8 negative controls, including 7 hard negatives — code
+that looks dangerous to pattern-matching but is actually guarded (allowlists,
+overwritten parameters, non-prompt strings).
+
+```bash
+python3 -m scripts.eval_harness --no-llm   # deterministic baseline
+python3 -m scripts.eval_harness            # LLM-integrated mode
+```
+
+Each case is scanned in isolation; accepted findings are graded against the
+label (matching on risk type, file path, and evidence content — not line
+numbers). Every run saves a JSON scorecard to `results/`.
+
+### Results (2026-07-02)
+
+| | Deterministic baseline | LLM-integrated |
+|---|---|---|
+| Precision | 0.615 | **0.700** |
+| Recall | **1.000** | 0.875 |
+| F1 | 0.762 | 0.778 |
+| Hard-negative false alarms | 5/8 | **3/8** |
+
+What the numbers say:
+
+- **Prompt injection (LLM-backed agent): false positives cleared with zero
+  recall loss** — all 3 hard negatives pass, the true injection is still caught.
+- The remaining false alarms come from agents that scored their mistakes
+  *confidently* (≥ 0.7), bypassing the evaluator's blind-review gate — the
+  measured version of the "high-confidence express lane" problem.
+- The blind reviewer rescued one lifecycle false positive but also dismissed a
+  real log leak: leak-type judgments need context the code window doesn't
+  carry. LLM integration helps exactly where the evidence lives in the window.
+
 ## Current Status
 
 | Component | Status |
@@ -95,6 +136,7 @@ Switching providers (OpenAI / Anthropic / Google) is a one-line change to `LLM_M
 | Evaluator agent | ✅ Done — confidence threshold, proximity-based dedup, coverage gap detection, rerun loop |
 | Reporter agent | ✅ Done — structured Markdown with severity grouping, action plan (P0/P1/P2), coverage notes |
 | Risk agent: lifecycle | ✅ Done — incomplete cleanup, log leakage, session state detection |
+| Eval harness (labeled fixtures, precision/recall/FP) | ✅ Done — 16 labeled cases (8 positive + 8 negative controls incl. 7 hard negatives); deterministic-vs-LLM scorecard saved per run |
 | Regex scanner (JS/TS targets) | ⏳ Planned |
 | CLI entry point | ⏳ Planned |
 | **LLM integration** | |

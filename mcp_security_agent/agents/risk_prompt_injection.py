@@ -1,5 +1,16 @@
 """
-Prompt injection risk agent — LLM-backed.
+Prompt injection risk agent. - LLM Integrated
+
+Detects cases where MCP tool arguments are interpolated into prompt-like strings,
+creating a path for model-controlled or user-controlled input to hijack LLM behavior.
+
+Strategy:
+- Pair mcp_tool features (which list user-controlled parameter names) with
+  prompt_construction features in the same file.
+- If a prompt_construction feature's snippet references one of the tool's params,
+  flag it as high-severity prompt injection.
+- Standalone prompt_construction features with no tool context get medium severity
+  (the risk exists but traceability is weaker).
 
 If get_llm() returns None (no
    key configured) or any call/parse fails, we fall back to the ORIGINAL
