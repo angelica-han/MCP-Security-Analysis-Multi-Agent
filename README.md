@@ -13,7 +13,8 @@ Point it at any MCP server/client project directory, and it will:
 3. **Extract code features** — use static analysis (AST + regex) to find dangerous patterns like shell calls, file access, and network requests
 4. **Run risk agents** — five specialized agents scan for different vulnerability classes (prompt injection, command execution, file access, network/SSRF, lifecycle)
 5. **Evaluate quality** — an Evaluator checks that every finding has real evidence and merges duplicates; low-confidence findings get a blind LLM second opinion (an independent re-read of the source code) and are rescued or demoted accordingly
-6. **Generate a report** — structured Markdown + JSON output with evidence chains, attack paths, and remediation suggestions
+6. **Retrieve references (RAG)** — each accepted finding is used as a query against a curated security knowledge base (CWE / OWASP / MCP guidance); relevant documents are attached so remediation advice is traceable to authoritative sources
+7. **Generate a report** — structured Markdown + JSON output with evidence chains, attack paths, remediation suggestions, and per-finding references
 
 ## Risk Categories
 
@@ -31,6 +32,7 @@ Point it at any MCP server/client project directory, and it will:
 - **Pydantic** — typed schemas for all inter-agent data; prevents hallucinated evidence
 - **Python AST module** — deterministic code feature extraction (no LLM guessing)
 - **LangChain LLM layer** — a pluggable chat model via `init_chat_model` (OpenAI / Anthropic / Google, switchable from `.env`). Used in three places: the reporter's **executive summary**, the evaluator's **blind second opinion** on low-confidence findings, and the **prompt-injection agent's** semantic judgment (does untrusted input really reach a prompt?). Every use is grounded in real code/facts and falls back to deterministic logic when no key is configured. The other risk scanners (command / file / network / lifecycle) stay fully deterministic (AST + regex).
+- **RAG retrieval layer (Chroma + OpenAI embeddings)** — accepted findings are matched against a curated knowledge base (`knowledge_base/`, CWE / OWASP source material) and the report cites the retrieved references per finding. Agentic RAG: the query is built from the finding's own fields (risk type + attack path + evidence), since no user question exists. Falls back to deterministic TF-IDF retrieval (scikit-learn) when no key is configured; with no backend at all, the pipeline still runs and simply attaches no references.
 
 ## Project Structure
 
@@ -51,13 +53,16 @@ mcp_security_agent/
 │   ├── llm_evaluator.py        # Blind LLM second opinion on low-confidence findings
 │   └── reporter.py
 └── tools/
-    ├── file_inventory.py   # Directory walker and file filter
-    ├── ast_scanner.py      # Python AST-based feature extraction
-    └── regex_scanner.py    # Pattern matching for JS/TS and config files
+    ├── file_inventory.py       # Directory walker and file filter
+    ├── ast_scanner.py          # Python AST-based feature extraction
+    ├── regex_scanner.py        # Pattern matching for JS/TS and config files
+    └── knowledge_retriever.py  # RAG retrieval: finding -> knowledge-base references
+knowledge_base/         # Curated security reference docs (CWE / OWASP), one per risk class
 scripts/
 ├── generate_labeled_fixtures.py  # Regenerates the labeled eval cases (source of truth)
 ├── hard_negative_cases.py        # 7 hard negatives: look dangerous but actually safe
-└── eval_harness.py               # Runs every labeled case, grades against ground truth
+├── eval_harness.py               # Runs every labeled case, grades against ground truth
+└── verify_rag.py                 # Retrieval smoke test: simulated findings vs knowledge base
 results/                # Output reports + eval JSONs land here (gitignored)
 sample_mcp_server/      # Deliberately vulnerable MCP server used as scan target
 tests/fixtures/         # Generated labeled cases (gitignored — rebuild via the script)
@@ -83,6 +88,35 @@ LLM_MODEL=openai:gpt-4o-mini
 ```
 
 Switching providers (OpenAI / Anthropic / Google) is a one-line change to `LLM_MODEL`. `.env` is gitignored — keys never enter the repo.
+
+## RAG Knowledge Base
+
+After the Evaluator accepts findings, a retrieval node (`rag` in the graph)
+matches each finding against `knowledge_base/` — curated reference documents
+(CWE entries, OWASP guidance) with one document per risk class, tagged with the
+same `risk_type` values used by `RiskFinding`. Retrieved references are
+rendered as a per-finding **References** section in the report.
+
+Design choices:
+
+- **The finding is the query** (agentic RAG): `risk_type + attack_path +
+  evidence` — the evidence snippet carries the signal that will discriminate
+  between sub-pattern documents once the knowledge base grows beyond one
+  document per class.
+- **No chunking yet**: documents are hand-curated at ~300 words, single-topic —
+  they are already retrieval-sized. Automatic chunking becomes necessary only
+  when ingesting long official texts.
+- **Relevance cutoff over forced citations**: documents beyond a distance
+  threshold are dropped; a finding with no close reference gets none.
+- Verify retrieval quality: `python3 -m scripts.verify_rag` (OpenAI embeddings)
+  or `python3 -m scripts.verify_rag --tfidf` (deterministic fallback).
+
+Known limits (deliberate, discussed for next iteration): document content is
+curated paraphrase and should move to verbatim official excerpts with per-section
+attribution; with one document per class, retrieval is near-trivial — the vector
+search earns its keep once each class has multiple sub-pattern documents; the
+retrieved content is cited but not yet fed into the LLM prompt for per-finding
+remediation narrative (the "G" of RAG is pending the reporter's LLM upgrade).
 
 ## Evaluation
 
@@ -145,6 +179,14 @@ What the numbers say:
 | LLM layer: evaluator | ✅ Done — blind second-opinion on low-confidence findings (re-judges source code independently of the agent's score); records agent-vs-LLM divergence per risk type; deterministic fallback |
 | LLM layer: prompt injection agent | ✅ Done — LLM reads the tool's full source and judges whether untrusted input really reaches a prompt, replacing the brittle param-name regex; clears false positives (allowlisted / reassigned / not-a-prompt cases) while keeping the same inputs, output shape, and pipeline position; deterministic regex fallback when no key is configured |
 | LLM layer: capability analysis | ⏳ Planned — richer trust boundary descriptions; JS/TS support |
+| **RAG** | |
+| Schemas (`RagDocument` / `RagContext`) + graph node | ✅ Done — retrieval runs after the Evaluator, on accepted findings only |
+| Knowledge base (5 docs, one per risk class) | ✅ Done — curated CWE/OWASP material; upgrade to verbatim official excerpts planned |
+| Retriever (`knowledge_retriever.py`) | ✅ Done — OpenAI embeddings + Chroma, TF-IDF fallback, distance cutoff |
+| Reporter: per-finding References section | ✅ Done — deterministic citations (title + source URL) |
+| Retrieval quality eval (hit@k) | ⏳ Planned — fold into the existing eval harness |
+| Multiple docs per class + retrieval tuning (threshold / top-k) | ⏳ Planned — makes vector search non-trivial; tune with real data |
+| Feed retrieved content into reporter LLM narrative ("G" of RAG) | ⏳ Planned — together with the per-finding LLM narrative upgrade |
 
 ## Design Principles
 

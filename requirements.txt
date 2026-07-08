@@ -7,3 +7,8 @@ langchain-anthropic
 langchain-openai
 langchain-google-genai
 python-dotenv
+
+# RAG retrieval layer (knowledge_base/ -> report references)
+chromadb          # vector store, used with OpenAI embeddings
+scikit-learn      # TF-IDF fallback backend (no-key / offline mode)
+openai            # embedding calls via chromadb's OpenAIEmbeddingFunction

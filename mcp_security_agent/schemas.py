@@ -203,6 +203,30 @@ class EvalResult(BaseModel):
 
 
 # ─────────────────────────────────────────────
+# 6.5 RAG knowledge-base context
+#     Produced by the retrieval node (after the Evaluator, for accepted
+#     findings only); consumed by the Reporter to ground remediation
+#     advice in authoritative references (CWE / OWASP / MCP docs).
+# ─────────────────────────────────────────────
+
+class RagDocument(BaseModel):
+    """One retrieved knowledge-base document used to enrich a finding."""
+    doc_id: str
+    title: str
+    source: str = ""                        # URL of the authoritative origin
+    risk_type: str = ""                     # matches RiskFinding.risk_type values
+    content: str
+    distance: Optional[float] = None        # retrieval distance; lower = more similar
+
+
+class RagContext(BaseModel):
+    """Retrieved RAG context for one accepted finding."""
+    finding_id: str
+    query: str                              # the query string built from the finding
+    documents: list[RagDocument] = Field(default_factory=list)
+
+
+# ─────────────────────────────────────────────
 # 7. Final report
 # ─────────────────────────────────────────────
 
@@ -238,6 +262,7 @@ class GraphState(BaseModel):
     code_features: list[CodeFeature] = Field(default_factory=list)
     risk_findings: list[RiskFinding] = Field(default_factory=list)
     eval_result: Optional[EvalResult] = None
+    rag_contexts: list[RagContext] = Field(default_factory=list)
     final_report: Optional[FinalReport] = None
 
     # Flow-control fields

@@ -20,6 +20,8 @@ Pipeline:
       ↓
   [evaluate]               Quality gate: accept / reject / merge / rerun
       ↓        ↘ needs_rerun → back to supervisor (max 2 times)
+  [rag]                    Retrieve knowledge-base references for accepted findings
+      ↓
   [report]                 Generate final report
       ↓
     END
@@ -45,6 +47,7 @@ from mcp_security_agent.schemas import (
     FinalReport,
 )
 from mcp_security_agent.tools.ast_scanner import scan_project
+from mcp_security_agent.tools.knowledge_retriever import retrieve_contexts
 
 
 # ══════════════════════════════════════════════
@@ -332,6 +335,26 @@ def node_evaluate(state: GraphState) -> dict:
     }
 
 
+def node_rag(state: GraphState) -> dict:
+    """
+    Node 6.5 — RAG retrieval: attach knowledge-base references to accepted
+    findings. The query is built from each finding's own fields (agentic RAG —
+    no user question exists; pipeline state is the questioner).
+    Runs only on the path to report, never inside the rerun loop.
+    Failure-safe: with no backend or empty knowledge_base/, contexts stay empty.
+    """
+    if not state.risk_findings:
+        print("📚 [rag] Skipped (no accepted findings)")
+        return {"rag_contexts": []}
+    print("📚 [rag] Retrieving knowledge-base references...")
+
+    contexts = retrieve_contexts(state.risk_findings)
+    attached = sum(1 for c in contexts if c.documents)
+    print(f"   {attached}/{len(contexts)} finding(s) got reference document(s)")
+
+    return {"rag_contexts": contexts}
+
+
 def node_report(state: GraphState) -> dict:
     """
     Node 7 — Report generation agent (V1: deterministic, no LLM).
@@ -345,6 +368,7 @@ def node_report(state: GraphState) -> dict:
         project_profile=state.project_profile,
         eval_result=state.eval_result,
         scan_request=state.scan_request,
+        rag_contexts=state.rag_contexts,
     )
 
     print(f"   Overall risk level: {report.overall_risk_level.upper()}")
@@ -367,7 +391,7 @@ def route_after_evaluate(state: GraphState) -> str:
     if state.eval_result and state.eval_result.needs_rerun and state.rerun_count < 2:
         print(f"🔄 [router] Quality threshold not met — rerun #{state.rerun_count + 1}...")
         return "supervisor"
-    return "report"
+    return "rag"
 
 
 # ══════════════════════════════════════════════
@@ -389,6 +413,7 @@ def build_graph():
     graph.add_node("scan_network", node_scan_network)
     graph.add_node("scan_lifecycle", node_scan_lifecycle)
     graph.add_node("evaluate", node_evaluate)
+    graph.add_node("rag", node_rag)
     graph.add_node("report", node_report)
 
     # Fixed edges: inventory → extract → profile → supervisor
@@ -412,10 +437,11 @@ def build_graph():
         route_after_evaluate,
         {
             "supervisor": "supervisor",  # rerun
-            "report": "report",          # proceed
+            "rag": "rag",                # proceed: retrieve references, then report
         }
     )
 
+    graph.add_edge("rag", "report")
     graph.add_edge("report", END)
 
     return graph.compile()

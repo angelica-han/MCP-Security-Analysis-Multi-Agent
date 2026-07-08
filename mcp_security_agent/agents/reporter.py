@@ -29,6 +29,7 @@ from mcp_security_agent.schemas import (
     EvalResult,
     FinalReport,
     ProjectProfile,
+    RagContext,
     RiskFinding,
     ScanRequest,
 )
@@ -59,6 +60,7 @@ def generate_report(
     eval_result: EvalResult | None,
     scan_request: ScanRequest,
     use_llm: bool = True,
+    rag_contexts: list[RagContext] | None = None,
 ) -> FinalReport:
     """
     Build a FinalReport from accepted findings and pipeline metadata.
@@ -76,6 +78,10 @@ def generate_report(
     use_llm:
         If True (default), polish the executive summary with an LLM. Set False
         to force the deterministic summary (useful for tests / reproducibility).
+    rag_contexts:
+        Knowledge-base references retrieved for accepted findings (RAG node).
+        Rendered as a per-finding "References" section — titles and source URLs
+        only, verbatim from the knowledge base. None / empty list = no section.
     """
 
     # ── 1. Overall risk level ────────────────────────────────────────────────
@@ -116,6 +122,7 @@ def generate_report(
         action_plan=action_plan,
         coverage_notes=coverage_notes,
         eval_result=eval_result,
+        rag_by_finding={c.finding_id: c for c in (rag_contexts or [])},
     )
 
     return FinalReport(
@@ -312,7 +319,9 @@ def _render_markdown(
     action_plan: list[str],
     coverage_notes: str,
     eval_result: EvalResult | None,
+    rag_by_finding: dict[str, RagContext] | None = None,
 ) -> str:
+    rag_by_finding = rag_by_finding or {}
     lines: list[str] = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     confidence = f"{eval_result.overall_confidence:.0%}" if eval_result else "N/A"
@@ -375,6 +384,16 @@ def _render_markdown(
                     f"**Remediation:** {f.remediation}",
                     "",
                 ]
+                # References retrieved by the RAG node — titles and source URLs
+                # verbatim from the knowledge base. Findings whose retrieval
+                # returned nothing relevant get no section (never force a citation).
+                ctx = rag_by_finding.get(f.finding_id)
+                if ctx and ctx.documents:
+                    lines += ["**References:**", ""]
+                    for doc in ctx.documents:
+                        link = f"[{doc.title}]({doc.source})" if doc.source else doc.title
+                        lines.append(f"- {link}")
+                    lines += [""]
                 if f.false_positive_notes:
                     lines += [
                         f"> ⚠️ False-positive note: {f.false_positive_notes}",
