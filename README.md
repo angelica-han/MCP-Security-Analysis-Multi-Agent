@@ -62,7 +62,9 @@ scripts/
 ├── generate_labeled_fixtures.py  # Regenerates the labeled eval cases (source of truth)
 ├── hard_negative_cases.py        # 7 hard negatives: look dangerous but actually safe
 ├── eval_harness.py               # Runs every labeled case, grades against ground truth
-└── verify_rag.py                 # Retrieval smoke test: simulated findings vs knowledge base
+├── verify_rag.py                 # Retrieval smoke test: simulated findings vs knowledge base
+└── generate_demo_report.py       # Scans sample_mcp_server, exports docs/data/demo_report.json
+docs/                   # Project website (GitHub Pages): static page rendering the demo report
 results/                # Output reports + eval JSONs land here (gitignored)
 sample_mcp_server/      # Deliberately vulnerable MCP server used as scan target
 tests/fixtures/         # Generated labeled cases (gitignored — rebuild via the script)
@@ -155,6 +157,16 @@ What the numbers say:
   real log leak: leak-type judgments need context the code window doesn't
   carry. LLM integration helps exactly where the evidence lives in the window.
 
+## Website
+
+`docs/` contains the project website, served via GitHub Pages (Settings → Pages → `main` / `docs`). It is a single static page — no framework, no build step — that renders `docs/data/demo_report.json`: a real pipeline scan of `sample_mcp_server`, exported by:
+
+```bash
+python3 -m scripts.generate_demo_report
+```
+
+The page renders the pipeline's JSON output unedited (findings, evidence, attack paths, references, action plan). Re-run the script and push to refresh the demo. An upload-and-scan version (dynamic backend, containerized) is planned as phase 2 — the same renderer will display its results.
+
 ## Current Status
 
 | Component | Status |
@@ -171,6 +183,7 @@ What the numbers say:
 | Reporter agent | ✅ Done — structured Markdown with severity grouping, action plan (P0/P1/P2), coverage notes |
 | Risk agent: lifecycle | ✅ Done — incomplete cleanup, log leakage, session state detection |
 | Eval harness (labeled fixtures, precision/recall/FP) | ✅ Done — 16 labeled cases (8 positive + 8 negative controls incl. 7 hard negatives); deterministic-vs-LLM scorecard saved per run |
+| Project website (`docs/`, GitHub Pages) | ✅ Done — static single-page site rendering a real demo scan; upload-and-scan (dynamic, containerized) planned as phase 2 |
 | Regex scanner (JS/TS targets) | ⏳ Planned |
 | CLI entry point | ⏳ Planned |
 | **LLM integration** | |

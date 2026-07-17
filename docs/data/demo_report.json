@@ -1,0 +1,137 @@
+{
+  "generated_at": "2026-07-17T03:18:50+00:00",
+  "target": "sample_mcp_server",
+  "overall_risk_level": "high",
+  "executive_summary": "The automated MCP security scan report indicates a high overall risk level, with a total of four findings identified. Among these, three are classified as high severity, while one is medium severity. The identified risk surfaces include command execution, file access, network SSRF, and prompt injection, all of which pose significant threats to the project's sensitive capabilities such as shell execution, file reading, network access, and prompt construction. Immediate attention is required to address these vulnerabilities to mitigate potential risks.",
+  "coverage_notes": "Requested scan categories: prompt_injection, command_exec, file_access, network, lifecycle. Active capabilities detected: shell_exec, file_read, network, prompt_construction. Overall finding confidence: 85%. Evaluator notes: Merged 1 duplicate finding(s).",
+  "action_plan": [
+    "[P1] command_exec in `server.py` line 33 — Avoid shell=True. Pass arguments as a list with shell=False and validate user-controlled arguments with an allowlist.",
+    "[P1] network_ssrf in `server.py` line 55 — Validate the URL against a strict allowlist of permitted domains/schemes. Reject private IP ranges, loopback addresses, and file:// / gopher:// schemes.",
+    "[P1] prompt_injection in `server.py` line 62 — Never interpolate raw tool arguments into prompts. Sanitize or allowlist inputs before constructing the prompt, or use a separate untrusted-data section clearly delimited from instructions.",
+    "[P2] file_access in `server.py` line 47 — Validate the file path against an allowlist of permitted directories. Use os.path.realpath() to resolve symlinks and assert the result is within a safe base directory before opening."
+  ],
+  "findings": [
+    {
+      "finding_id": "84306f4f",
+      "risk_type": "command_exec",
+      "severity": "high",
+      "confidence": 0.9,
+      "file_path": "server.py",
+      "line_range": [
+        33,
+        39
+      ],
+      "evidence": "result = subprocess.run(\n        command,\n        shell=True,\n        capture_output=True,\n        text=True,\n        timeout=10,\n    )",
+      "attack_path": "MCP tool argument(s) command -> subprocess.run -> command/code execution",
+      "impact": "Attacker-controlled input may execute arbitrary operating-system commands on the MCP server.",
+      "remediation": "Avoid shell=True. Pass arguments as a list with shell=False and validate user-controlled arguments with an allowlist.",
+      "false_positive_notes": "This rule is strongest when the sink appears inside an @mcp.tool function, making function parameters model/user controlled.",
+      "source_feature_id": "084ba0d2",
+      "agent_confidence": null,
+      "llm_confidence": null,
+      "llm_rationale": ""
+    },
+    {
+      "finding_id": "ad294b5e",
+      "risk_type": "prompt_injection",
+      "severity": "high",
+      "confidence": 0.95,
+      "file_path": "server.py",
+      "line_range": [
+        62,
+        68
+      ],
+      "evidence": "return f\"\"\"\nYou are a careful research assistant.\nSummarize the following notes.\n\nNotes:\n{notes}\n\"\"\"",
+      "attack_path": "MCP tool 'draft_summary_prompt' parameter(s) ['notes'] -> interpolated into prompt string -> LLM instruction injection",
+      "impact": "An attacker controlling the tool argument can embed instructions that override the system prompt, exfiltrate context, or cause the model to take unintended actions.",
+      "remediation": "Never interpolate raw tool arguments into prompts. Sanitize or allowlist inputs before constructing the prompt, or use a separate untrusted-data section clearly delimited from instructions.",
+      "false_positive_notes": "LLM judgment: The user-controlled 'notes' parameter is directly included in the prompt sent to the LLM, allowing for prompt injection.",
+      "source_feature_id": "e7417831",
+      "agent_confidence": null,
+      "llm_confidence": null,
+      "llm_rationale": ""
+    },
+    {
+      "finding_id": "9a97a5b3",
+      "risk_type": "file_access",
+      "severity": "medium",
+      "confidence": 0.8,
+      "file_path": "server.py",
+      "line_range": [
+        47,
+        47
+      ],
+      "evidence": "with open(target_path, \"r\", encoding=\"utf-8\") as handle:",
+      "attack_path": "MCP tool argument(s) relative_path -> open(path) -> read from arbitrary file",
+      "impact": "An attacker controlling the file path can read arbitrary files from the server, including secrets and config.",
+      "remediation": "Validate the file path against an allowlist of permitted directories. Use os.path.realpath() to resolve symlinks and assert the result is within a safe base directory before opening.",
+      "false_positive_notes": "Confidence is based on parameter name appearing in the enclosing MCP tool. Verify the parameter actually flows to the path argument, not just the same function.",
+      "source_feature_id": "de08881f",
+      "agent_confidence": null,
+      "llm_confidence": null,
+      "llm_rationale": ""
+    },
+    {
+      "finding_id": "6939233b",
+      "risk_type": "network_ssrf",
+      "severity": "high",
+      "confidence": 0.75,
+      "file_path": "server.py",
+      "line_range": [
+        55,
+        55
+      ],
+      "evidence": "response = requests.get(url, headers=headers, timeout=5)",
+      "attack_path": "MCP tool argument(s) url -> requests.get(url) -> GET request to attacker-controlled or unvalidated URL -> SSRF",
+      "impact": "Attacker can cause the MCP server to make GET requests to arbitrary URLs, potentially leaking the server's IP, triggering internal side effects, or reaching restricted network endpoints.",
+      "remediation": "Validate the URL against a strict allowlist of permitted domains/schemes. Reject private IP ranges, loopback addresses, and file:// / gopher:// schemes.",
+      "false_positive_notes": "Confidence based on parameter name in enclosing MCP tool. Confirm the parameter actually flows to the URL argument.",
+      "source_feature_id": "60627a87",
+      "agent_confidence": null,
+      "llm_confidence": null,
+      "llm_rationale": ""
+    }
+  ],
+  "references": {
+    "84306f4f": [
+      {
+        "title": "CWE-78: OS Command Injection",
+        "source": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      {
+        "title": "CWE-22: Path Traversal",
+        "source": "https://cwe.mitre.org/data/definitions/22.html"
+      }
+    ],
+    "ad294b5e": [
+      {
+        "title": "OWASP LLM01: Prompt Injection",
+        "source": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"
+      },
+      {
+        "title": "CWE-78: OS Command Injection",
+        "source": "https://cwe.mitre.org/data/definitions/78.html"
+      }
+    ],
+    "9a97a5b3": [
+      {
+        "title": "CWE-22: Path Traversal",
+        "source": "https://cwe.mitre.org/data/definitions/22.html"
+      },
+      {
+        "title": "CWE-532: Insertion of Sensitive Information into Log File",
+        "source": "https://cwe.mitre.org/data/definitions/532.html"
+      }
+    ],
+    "6939233b": [
+      {
+        "title": "CWE-918: Server-Side Request Forgery (SSRF)",
+        "source": "https://cwe.mitre.org/data/definitions/918.html"
+      },
+      {
+        "title": "OWASP LLM01: Prompt Injection",
+        "source": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"
+      }
+    ]
+  }
+}
