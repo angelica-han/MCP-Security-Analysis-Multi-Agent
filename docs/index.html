@@ -5,178 +5,228 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MCP Security Scanner — evidence-backed multi-agent analysis</title>
 <meta name="description" content="A LangGraph multi-agent system that audits MCP servers for prompt injection, command execution, SSRF and more — every finding backed by real code evidence.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --paper: #fdfcfa;
-    --panel: #f4f3ee;
-    --panel-deep: #ece9e0;
-    --ink: #1f1f1d;
-    --muted: #5f5e5a;
-    --faint: #888780;
-    --line: #ddd9cd;
-    --accent: #534ab7;
-    --crit: #a32d2d;   --crit-bg: #fcebeb;
-    --high: #9a5f0a;   --high-bg: #faeeda;
-    --med:  #5f5e5a;   --med-bg:  #f1efe8;
-    --low:  #3b6d11;   --low-bg:  #eaf3de;
-    --mono: "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --serif: Georgia, "Times New Roman", serif;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --bg: #ffffff;
+    --bg-soft: #f8fafc;
+    --panel: #f1f5f9;
+    --ink: #0f172a;
+    --muted: #475569;
+    --faint: #94a3b8;
+    --line: #e2e8f0;
+    --line-soft: #eef2f6;
+    --accent: #4f46e5;
+    --accent-deep: #4338ca;
+    --accent-soft: #eef2ff;
+    --crit: #b91c1c;   --crit-bg: #fef2f2;
+    --high: #b45309;   --high-bg: #fffbeb;
+    --med:  #475569;   --med-bg:  #f1f5f9;
+    --low:  #15803d;   --low-bg:  #f0fdf4;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; }
   html { scroll-behavior: smooth; }
-  body { background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.65; }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 28px; }
   a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  code { font-family: var(--mono); font-size: 0.92em; background: var(--panel); padding: 1px 5px; border-radius: 3px; }
+  a:hover { color: var(--accent-deep); }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--panel); padding: 1px 6px; border-radius: 4px; color: var(--ink); }
 
   header.site {
-    display: flex; justify-content: space-between; align-items: baseline;
-    padding: 20px 0; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 0; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: rgba(255,255,255,0.85); backdrop-filter: blur(8px); z-index: 10;
   }
-  header.site .brand { font-weight: 600; font-size: 15px; color: var(--ink); }
-  header.site nav a { color: var(--muted); font-size: 14px; margin-left: 22px; }
-  header.site nav a:hover { color: var(--ink); text-decoration: none; }
+  header.site .brand { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+  header.site .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  header.site nav a { color: var(--muted); font-size: 14px; font-weight: 500; margin-left: 26px; }
+  header.site nav a:hover { color: var(--ink); }
 
-  .hero { padding: 72px 0 56px; }
-  .hero .kicker { color: var(--accent); font-size: 14px; letter-spacing: 0.02em; margin-bottom: 14px; }
-  .hero h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(30px, 5vw, 42px); line-height: 1.22; margin-bottom: 18px; }
-  .hero .lede { color: var(--muted); font-size: 17px; max-width: 560px; margin-bottom: 30px; }
-  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 44px; }
-  .btn { display: inline-block; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500; }
-  .btn.primary { background: var(--ink); color: var(--paper); }
-  .btn.primary:hover { background: #000; text-decoration: none; }
-  .btn.ghost { border: 1px solid var(--line); color: var(--ink); }
-  .btn.ghost:hover { border-color: var(--faint); text-decoration: none; }
-  .stat-strip { display: flex; gap: 40px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 22px; }
-  .stat-strip .stat b { display: block; font-size: 22px; font-weight: 600; }
-  .stat-strip .stat span { font-size: 13px; color: var(--muted); }
+  .hero { padding: 84px 0 60px; }
+  .hero .kicker { display: inline-block; font-family: var(--mono); color: var(--accent-deep); background: var(--accent-soft); font-size: 12px; font-weight: 500; letter-spacing: 0.01em; padding: 5px 12px; border-radius: 20px; margin-bottom: 22px; }
+  .hero h1 { font-weight: 800; font-size: clamp(34px, 5.4vw, 54px); line-height: 1.05; letter-spacing: -0.03em; margin-bottom: 22px; }
+  .hero h1 .grad { color: var(--accent); }
+  .hero .lede { color: var(--muted); font-size: 18px; max-width: 600px; margin-bottom: 34px; line-height: 1.6; }
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 54px; }
+  .btn { display: inline-flex; align-items: center; gap: 7px; padding: 11px 22px; border-radius: 9px; font-size: 14.5px; font-weight: 600; transition: all .15s; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-deep); color: #fff; }
+  .btn.ghost { border: 1px solid var(--line); color: var(--ink); background: #fff; }
+  .btn.ghost:hover { border-color: var(--faint); }
+  .stat-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .stat-strip .stat { padding: 22px 24px; border-right: 1px solid var(--line); }
+  .stat-strip .stat:last-child { border-right: none; }
+  .stat-strip .stat b { display: block; font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
+  .stat-strip .stat span { font-size: 13px; color: var(--muted); font-weight: 500; }
 
-  section { padding: 56px 0; border-top: 1px solid var(--line); }
-  section > .wrap > h2 { font-family: var(--serif); font-weight: 500; font-size: 28px; margin-bottom: 10px; }
-  .section-lede { color: var(--muted); max-width: 620px; margin-bottom: 36px; }
+  section { padding: 64px 0; border-top: 1px solid var(--line); }
+  .eyebrow { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
+  section > .wrap > h2 { font-weight: 700; font-size: 30px; letter-spacing: -0.02em; margin-bottom: 12px; }
+  .section-lede { color: var(--muted); max-width: 640px; margin-bottom: 40px; font-size: 16px; }
 
-  .pipeline { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
-  .stage { flex: 1 1 130px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 130px; }
-  .stage .num { font-family: var(--mono); font-size: 11px; color: var(--faint); }
-  .stage h3 { font-size: 14px; font-weight: 600; margin: 2px 0 4px; }
-  .stage p { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
-  .stage.llm { border-color: #b9b3e3; background: #f1effb; }
-  .stage.llm .tag { display: inline-block; font-size: 10.5px; font-weight: 600; color: var(--accent); background: #e4e1f6; border-radius: 3px; padding: 0 6px; margin-top: 6px; }
-  .pipe-note { font-size: 13px; color: var(--muted); margin-top: 18px; }
+  .pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .stage { display: block; width: 100%; text-align: left; font: inherit; color: inherit; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 12px; padding: 18px; transition: all .15s; cursor: pointer; }
+  .stage:hover { border-color: var(--faint); transform: translateY(-2px); }
+  .stage.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); transform: none; }
+  .stage .more { display: block; font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--accent); margin-top: 10px; }
+  .stage .num { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--faint); }
+  .stage-modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px;
+    background: rgba(15,23,42,0.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    opacity: 0; visibility: hidden; transition: opacity .2s ease, visibility .2s ease; }
+  .stage-modal.show { opacity: 1; visibility: visible; }
+  .stage-modal .sd-card { width: 100%; max-width: 640px; max-height: 85vh; overflow-y: auto;
+    background: #fff; border-radius: 18px; padding: 32px 34px; box-shadow: 0 24px 70px -18px rgba(15,23,42,0.5);
+    transform: scale(0.96) translateY(8px); transition: transform .2s ease; }
+  .stage-modal.show .sd-card { transform: none; }
+  .stage-modal .close { float: right; border: 1px solid var(--line); background: #fff; border-radius: 7px; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--muted); cursor: pointer; padding: 5px 12px; }
+  .stage-modal .close:hover { border-color: var(--faint); background: var(--bg-soft); }
+  .stage-modal .sd-num { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); }
+  .stage-modal .sd-card h3 { font-size: 23px; font-weight: 700; letter-spacing: -0.01em; margin: 6px 0 16px; }
+  .stage-modal .sd-card p { font-size: 15px; color: var(--muted); line-height: 1.65; margin-bottom: 13px; }
+  .stage-modal .sd-card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 14.5px; }
+  .stage-modal .sd-card li { margin-bottom: 8px; line-height: 1.55; }
+  body.modal-open { overflow: hidden; }
+  .stage h3 { font-size: 15px; font-weight: 600; margin: 6px 0 6px; letter-spacing: -0.01em; }
+  .stage p { font-size: 13px; color: var(--muted); line-height: 1.55; }
+  .stage.llm { border-color: #c7d2fe; background: var(--accent-soft); }
+  .stage.llm .tag { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--accent-deep); background: #fff; border: 1px solid #c7d2fe; border-radius: 5px; padding: 2px 8px; margin-top: 10px; }
+  .pipe-note { font-size: 13.5px; color: var(--muted); margin-top: 22px; }
 
-  .console { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
-  .console-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
-  .console-bar .path { font-family: var(--mono); font-size: 13px; }
+  .console { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,0.04), 0 10px 40px -12px rgba(15,23,42,0.10); }
+  .console-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px; background: var(--bg-soft); border-bottom: 1px solid var(--line); }
+  .console-bar .path { font-family: var(--mono); font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .console-bar .path .traffic { display: inline-flex; gap: 6px; margin-right: 6px; }
+  .console-bar .path .traffic i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); }
   .console-bar .path .dim { color: var(--faint); }
   .chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
-  .chip { font-family: var(--mono); font-size: 11.5px; padding: 3px 10px; border-radius: 4px; }
+  .chip { font-family: var(--mono); font-size: 11.5px; font-weight: 600; padding: 4px 11px; border-radius: 6px; border: 1px solid transparent; line-height: 1.5; }
+  button.chip { cursor: pointer; transition: box-shadow .12s; }
+  button.chip:hover { box-shadow: inset 0 0 0 1px currentColor; }
+  .chip.active { box-shadow: inset 0 0 0 1.5px currentColor; }
   .chip.crit { background: var(--crit-bg); color: var(--crit); }
   .chip.high { background: var(--high-bg); color: var(--high); }
   .chip.med  { background: var(--med-bg);  color: var(--med); }
   .chip.low  { background: var(--low-bg);  color: var(--low); }
-  .exec-summary { padding: 16px 18px; font-size: 14px; color: var(--muted); border-bottom: 1px solid var(--line); }
-  .console-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); }
-  @media (max-width: 640px) { .console-body { grid-template-columns: 1fr; } .filetree { border-right: none !important; border-bottom: 1px solid var(--line); } }
-  .filetree { border-right: 1px solid var(--line); background: var(--panel); padding: 12px 0; font-family: var(--mono); font-size: 12.5px; }
-  .filetree .dir { padding: 3px 16px; color: var(--faint); }
-  .filetree button { display: block; width: 100%; text-align: left; border: 0; background: none; cursor: pointer; font: inherit; color: var(--muted); padding: 4px 16px 4px 28px; }
-  .filetree button:hover { background: var(--panel-deep); }
-  .filetree button.active { background: var(--panel-deep); color: var(--ink); }
-  .filetree .cnt { float: right; }
-  .findings { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
-  .finding { border: 1px solid var(--line); border-left: 3px solid var(--med); border-radius: 0 6px 6px 0; background: #fff; }
+  .chip.all  { background: var(--med-bg);  color: var(--muted); }
+  .chip.overall { background: transparent; color: var(--faint); border-color: var(--line); }
+  .exec-summary { padding: 18px 20px; font-size: 14.5px; color: var(--muted); border-bottom: 1px solid var(--line); line-height: 1.6; }
+  .console-body { display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+  @media (max-width: 660px) { .console-body { grid-template-columns: 1fr; } .filetree { border-right: none !important; border-bottom: 1px solid var(--line); } }
+  .filetree { border-right: 1px solid var(--line); background: var(--bg-soft); padding: 14px 0; font-family: var(--mono); font-size: 12.5px; }
+  .filetree .dir { padding: 4px 18px; color: var(--faint); font-weight: 600; }
+  .filetree button { display: block; width: 100%; text-align: left; border: 0; background: none; cursor: pointer; font: inherit; color: var(--muted); padding: 6px 18px 6px 30px; border-left: 2px solid transparent; }
+  .filetree button:hover { background: var(--panel); }
+  .filetree button.active { background: #fff; color: var(--accent-deep); border-left-color: var(--accent); font-weight: 600; }
+  .filetree .cnt { float: right; color: var(--faint); }
+  .findings { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .finding { border: 1px solid var(--line); border-left: 3px solid var(--med); border-radius: 10px; background: #fff; transition: border-color .15s; }
+  .finding:hover { border-color: var(--faint); }
   .finding.crit { border-left-color: var(--crit); }
   .finding.high { border-left-color: var(--high); }
   .finding.low  { border-left-color: var(--low); }
-  .finding > button { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%; text-align: left; border: 0; background: none; cursor: pointer; font: inherit; padding: 11px 14px; }
-  .finding .rt { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .finding > button { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%; text-align: left; border: 0; background: none; cursor: pointer; font: inherit; padding: 13px 16px; }
+  .finding .rt { font-family: var(--mono); font-size: 13.5px; font-weight: 600; }
   .finding.crit .rt { color: var(--crit); } .finding.high .rt { color: var(--high); }
   .finding.med .rt { color: var(--med); }  .finding.low .rt { color: var(--low); }
-  .finding .meta { font-size: 12px; color: var(--faint); }
+  .finding .meta { font-size: 12.5px; color: var(--faint); font-family: var(--mono); }
   .finding .caret { color: var(--faint); font-size: 12px; flex-shrink: 0; }
-  .finding .detail { display: none; padding: 0 14px 14px; font-size: 13.5px; }
+  .finding .detail { display: none; padding: 0 16px 16px; font-size: 13.5px; }
   .finding.open .detail { display: block; }
-  .detail pre { font-family: var(--mono); font-size: 12.5px; background: var(--panel); border-radius: 5px; padding: 10px 12px; overflow-x: auto; margin: 6px 0 12px; line-height: 1.5; }
-  .detail dt { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); margin-top: 10px; }
-  .detail dd { margin: 2px 0 0; color: var(--ink); }
-  .detail .refs a { display: inline-block; margin-right: 14px; font-size: 13px; }
-  .action-plan { padding: 14px 18px; border-top: 1px solid var(--line); background: var(--panel); font-size: 13.5px; }
-  .action-plan b { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); display: block; margin-bottom: 4px; }
+  .detail pre { font-family: var(--mono); font-size: 12.5px; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 8px 0 14px; line-height: 1.55; }
+  .detail dt { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); margin-top: 12px; }
+  .detail dd { margin: 3px 0 0; color: var(--ink); line-height: 1.55; }
+  .detail .refs a { display: inline-flex; align-items: center; gap: 4px; margin-right: 14px; font-size: 13px; font-weight: 500; }
+  .coverage { padding: 14px 20px; border-top: 1px solid var(--line); background: var(--bg-soft); font-size: 12.5px; color: var(--muted); font-family: var(--mono); line-height: 1.6; }
+  .coverage b { color: var(--ink); }
+  .action-plan { padding: 16px 20px; border-top: 1px solid var(--line); background: var(--accent-soft); font-size: 13.5px; }
+  .action-plan .hd { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-deep); display: block; margin-bottom: 8px; }
   .action-plan ol { margin: 0 0 0 18px; padding: 0; color: var(--muted); }
-  .demo-note { font-size: 13px; color: var(--faint); margin-top: 14px; }
+  .action-plan li { margin-bottom: 5px; line-height: 1.5; }
+  .demo-note { font-size: 13px; color: var(--faint); margin-top: 16px; }
 
-  table.scorecard { border-collapse: collapse; width: 100%; max-width: 640px; font-size: 14px; margin-bottom: 20px; }
-  .scorecard th, .scorecard td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); }
-  .scorecard th { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
-  .scorecard td.win { font-weight: 600; }
-  .eval-notes { max-width: 640px; color: var(--muted); font-size: 14.5px; }
-  .eval-notes li { margin-bottom: 8px; }
+  table.scorecard { border-collapse: collapse; width: 100%; max-width: 680px; font-size: 14.5px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .scorecard th, .scorecard td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .scorecard tr:last-child td { border-bottom: none; }
+  .scorecard th { font-family: var(--mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--faint); font-weight: 600; background: var(--bg-soft); }
+  .scorecard td.win { font-weight: 700; color: var(--accent-deep); }
+  .eval-notes { max-width: 680px; color: var(--muted); font-size: 15px; padding-left: 2px; }
+  .eval-notes li { margin-bottom: 10px; line-height: 1.55; }
 
-  .principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
-  .principle { border: 1px solid var(--line); border-radius: 8px; padding: 18px; background: #fff; }
-  .principle h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-  .principle p { font-size: 13.5px; color: var(--muted); }
+  .principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .principle { border: 1px solid var(--line); border-radius: 12px; padding: 22px; background: #fff; transition: all .15s; }
+  .principle:hover { border-color: var(--faint); transform: translateY(-2px); }
+  .principle .ic { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-deep); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 700; margin-bottom: 12px; }
+  .principle h3 { font-size: 15.5px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.01em; }
+  .principle p { font-size: 13.5px; color: var(--muted); line-height: 1.55; }
 
-  .try-box { border: 1.5px dashed var(--line); border-radius: 10px; padding: 36px; text-align: center; color: var(--muted); }
-  .try-box b { color: var(--ink); font-size: 16px; display: block; margin-bottom: 6px; }
+  .try-box { border: 1px solid var(--line); border-radius: 16px; padding: 44px; text-align: center; color: var(--muted); background: var(--bg-soft); }
+  .try-box b { color: var(--ink); font-size: 18px; font-weight: 700; display: block; margin-bottom: 8px; letter-spacing: -0.01em; }
 
-  footer { border-top: 1px solid var(--line); padding: 28px 0 48px; font-size: 13px; color: var(--faint); }
+  footer { border-top: 1px solid var(--line); padding: 34px 0 56px; font-size: 13.5px; color: var(--faint); }
+  footer b { color: var(--muted); font-weight: 600; }
 </style>
 </head>
 <body>
 
-<div class="wrap">
-  <header class="site">
-    <span class="brand">MCP Security Scanner</span>
+<header class="site">
+  <div class="wrap" style="display:flex;justify-content:space-between;align-items:center;padding:0;max-width:1000px;">
+    <span class="brand"><span class="dot"></span>MCP Security Scanner</span>
     <nav>
       <a href="#how">How it works</a>
       <a href="#demo">Demo report</a>
       <a href="#eval">Evaluation</a>
       <a href="https://github.com/angelica-han/MCP-Security-Analysis-Multi-Agent">GitHub</a>
     </nav>
-  </header>
+  </div>
+</header>
 
+<div class="wrap">
   <div class="hero">
-    <p class="kicker">A LangGraph multi-agent research project</p>
-    <h1>Evidence-backed security analysis<br>for MCP servers</h1>
+    <span class="kicker">LangGraph multi-agent research project</span>
+    <h1>Evidence-backed security<br>analysis for <span class="grad">MCP servers</span></h1>
     <p class="lede">Five specialized agents scan for prompt injection, command execution, SSRF and more. Every finding carries a verbatim code snippet, an attack path, and CWE&thinsp;/&thinsp;OWASP references — and no user code is ever executed.</p>
     <div class="btn-row">
-      <a class="btn primary" href="#demo">View demo report</a>
-      <a class="btn ghost" href="#try">Scan your own server — coming soon</a>
+      <a class="btn primary" href="#demo">View demo report →</a>
+      <a class="btn ghost" href="#try">Scan your own server</a>
     </div>
     <div class="stat-strip">
       <div class="stat"><b>5</b><span>risk agents</span></div>
+      <div class="stat"><b>5&nbsp;→&nbsp;3</b><span>hard-neg false alarms cut</span></div>
       <div class="stat"><b>16</b><span>labeled eval cases</span></div>
-      <div class="stat"><b>0.70</b><span>precision, LLM mode</span></div>
-      <div class="stat"><b>100%</b><span>static — no code executed</span></div>
+      <div class="stat"><b>100%</b><span>static — no code run</span></div>
     </div>
   </div>
 </div>
 
 <section id="how">
   <div class="wrap">
+    <p class="eyebrow">Pipeline</p>
     <h2>How it works</h2>
     <p class="section-lede">The pipeline is deterministic-first: static analysis gathers the evidence, and LLMs are only allowed to judge what they can actually see. Every LLM step has a deterministic fallback.</p>
     <div class="pipeline">
-      <div class="stage"><span class="num">01</span><h3>Scan &amp; profile</h3><p>Inventory source files, map MCP capabilities and trust boundaries.</p></div>
-      <div class="stage"><span class="num">02</span><h3>Extract features</h3><p>AST + regex find shell calls, file access, network requests — no LLM guessing.</p></div>
-      <div class="stage llm"><span class="num">03</span><h3>5 risk agents</h3><p>Prompt injection, command exec, file access, SSRF, lifecycle.</p><span class="tag">LLM: semantic judgment</span></div>
-      <div class="stage llm"><span class="num">04</span><h3>Blind review</h3><p>Low-confidence findings get an independent second opinion — the reviewer never sees the agent's score.</p><span class="tag">LLM: second opinion</span></div>
-      <div class="stage llm"><span class="num">05</span><h3>RAG + report</h3><p>Accepted findings retrieve CWE/OWASP references; report renders with evidence chains.</p><span class="tag">LLM: summary</span></div>
+      <button class="stage" data-stage="0" aria-expanded="false"><span class="num">01</span><h3>Scan &amp; profile</h3><p>Inventory source files, map MCP capabilities and trust boundaries.</p><span class="more">Details →</span></button>
+      <button class="stage" data-stage="1" aria-expanded="false"><span class="num">02</span><h3>Extract features</h3><p>AST + regex find shell calls, file access, network requests — no LLM guessing.</p><span class="more">Details →</span></button>
+      <button class="stage" data-stage="2" aria-expanded="false"><span class="num">03</span><h3>5 risk agents</h3><p>Prompt injection, command exec, file access, SSRF, lifecycle.</p><span class="tag">LLM: prompt injection only</span><span class="more">Details →</span></button>
+      <button class="stage llm" data-stage="3" aria-expanded="false"><span class="num">04</span><h3>Blind review</h3><p>Low-confidence findings get an independent second opinion — the reviewer never sees the agent's score.</p><span class="tag">LLM: second opinion</span><span class="more">Details →</span></button>
+      <button class="stage llm" data-stage="4" aria-expanded="false"><span class="num">05</span><h3>RAG + report</h3><p>Accepted findings retrieve CWE/OWASP references; report renders with evidence chains.</p><span class="tag">LLM: summary</span><span class="more">Details →</span></button>
     </div>
-    <p class="pipe-note">Purple stages use a language model, each grounded in real code and each with a deterministic fallback when no key is configured.</p>
+    <div class="stage-modal" id="stage-detail"><div class="sd-card" id="sd-card"></div></div>
+    <p class="pipe-note">Indigo stages use a language model, each grounded in real code and each with a deterministic fallback when no key is configured. The five risk agents are deterministic except prompt injection, which uses an LLM to judge whether untrusted input truly reaches a prompt. Click any stage for detail.</p>
   </div>
 </section>
 
 <section id="demo">
   <div class="wrap">
+    <p class="eyebrow">Live output</p>
     <h2>Demo report</h2>
     <p class="section-lede">A real scan of <code>sample_mcp_server</code> — a deliberately vulnerable MCP server that ships with the repo. Click a finding to see its evidence, attack path, and references.</p>
     <div class="console">
       <div class="console-bar">
-        <span class="path">sample_mcp_server <span class="dim">/ scan results</span></span>
+        <span class="path"><span class="traffic"><i></i><i></i><i></i></span>sample_mcp_server <span class="dim">/ scan results</span></span>
         <span class="chip-row" id="chips"></span>
       </div>
       <div class="exec-summary" id="exec-summary"></div>
@@ -184,6 +234,7 @@
         <div class="filetree" id="filetree"></div>
         <div class="findings" id="findings"></div>
       </div>
+      <div class="coverage" id="coverage"></div>
       <div class="action-plan" id="action-plan"></div>
     </div>
     <p class="demo-note" id="demo-note"></p>
@@ -192,6 +243,7 @@
 
 <section id="eval">
   <div class="wrap">
+    <p class="eyebrow">Measured</p>
     <h2>Evaluation</h2>
     <p class="section-lede">Measured against 16 labeled cases with ground truth: 8 real vulnerabilities (one per risk class) and 8 negative controls — including 7 <em>hard negatives</em>: code that looks dangerous to pattern-matching but is actually guarded.</p>
     <table class="scorecard">
@@ -211,18 +263,20 @@
 
 <section id="principles">
   <div class="wrap">
+    <p class="eyebrow">Design</p>
     <h2>Design principles</h2>
     <div class="principles">
-      <div class="principle"><h3>Evidence first</h3><p>A finding without a verbatim code snippet is rejected. The reporter can only phrase facts that the pipeline already established — it cannot invent findings or numbers.</p></div>
-      <div class="principle"><h3>Blind second opinions</h3><p>The LLM reviewer re-reads the source without seeing the agent's score or reasoning, so its judgment is independent — divergence between the two is a measurable signal.</p></div>
-      <div class="principle"><h3>Deterministic fallback</h3><p>Every LLM call can fail or run keyless; the pipeline always completes on AST + regex + templates alone.</p></div>
-      <div class="principle"><h3>Traceable advice</h3><p>Remediation references are retrieved from a curated CWE&thinsp;/&thinsp;OWASP knowledge base per finding — not recalled from model memory.</p></div>
+      <div class="principle"><div class="ic">01</div><h3>Evidence first</h3><p>A finding without a verbatim code snippet is rejected. The reporter can only phrase facts that the pipeline already established — it cannot invent findings or numbers.</p></div>
+      <div class="principle"><div class="ic">02</div><h3>Blind second opinions</h3><p>The LLM reviewer re-reads the source without seeing the agent's score or reasoning, so its judgment is independent — divergence between the two is a measurable signal.</p></div>
+      <div class="principle"><div class="ic">03</div><h3>Deterministic fallback</h3><p>Every LLM call can fail or run keyless; the pipeline always completes on AST + regex + templates alone.</p></div>
+      <div class="principle"><div class="ic">04</div><h3>Traceable advice</h3><p>Remediation references are retrieved from a curated CWE&thinsp;/&thinsp;OWASP knowledge base per finding — not recalled from model memory.</p></div>
     </div>
   </div>
 </section>
 
 <section id="try">
   <div class="wrap">
+    <p class="eyebrow">Coming soon</p>
     <h2>Try it yourself</h2>
     <div class="try-box">
       <b>Upload-and-scan is coming soon</b>
@@ -234,7 +288,7 @@
 
 <footer>
   <div class="wrap">
-    Built by Angelica Han · LangGraph, Pydantic, Chroma · <a href="https://github.com/angelica-han/MCP-Security-Analysis-Multi-Agent">Source on GitHub</a> · Research prototype — results are advisory, not a security audit.
+    Built by <b>Angelica Han</b> · LangGraph, Pydantic, Chroma · <a href="https://github.com/angelica-han/MCP-Security-Analysis-Multi-Agent">Source on GitHub</a> · Research prototype — results are advisory, not a security audit.
   </div>
 </footer>
 
@@ -256,32 +310,57 @@ async function main() {
   const findings = [...data.findings].sort((a, b) =>
     (SEV_ORDER[a.severity] - SEV_ORDER[b.severity]) || (b.confidence - a.confidence));
 
+  document.getElementById("exec-summary").textContent = data.executive_summary;
+
   const counts = {};
   findings.forEach(f => counts[f.severity] = (counts[f.severity] || 0) + 1);
-  document.getElementById("chips").innerHTML =
-    Object.keys(SEV_ORDER).filter(s => counts[s])
-      .map(s => `<span class="chip ${SEV_CLASS[s]}">${s} ${counts[s]}</span>`).join("") +
-    `<span class="chip med">overall: ${esc(data.overall_risk_level)}</span>`;
-
-  document.getElementById("exec-summary").textContent = data.executive_summary;
 
   const byFile = {};
   findings.forEach(f => (byFile[f.file_path] = byFile[f.file_path] || []).push(f));
+
+  let filterFile = "";
+  let filterSev = "";
+
+  const chipsEl = document.getElementById("chips");
   const tree = document.getElementById("filetree");
-  tree.innerHTML = `<div class="dir">${esc(data.target)}/</div>` +
-    Object.keys(byFile).sort().map(fp =>
-      `<button data-file="${esc(fp)}">${esc(fp)} <span class="cnt">●${byFile[fp].length}</span></button>`).join("") +
-    `<button data-file="" class="active">all findings <span class="cnt">${findings.length}</span></button>`;
+
+  function renderChips() {
+    chipsEl.innerHTML =
+      Object.keys(SEV_ORDER).filter(s => counts[s])
+        .map(s => `<button class="chip ${SEV_CLASS[s]}${filterSev === s ? " active" : ""}" data-sev="${s}" title="Show only ${s} findings">${s} ${counts[s]}</button>`).join("") +
+      `<button class="chip all${filterSev === "" ? " active" : ""}" data-sev="" title="Show all severities">all ${findings.length}</button>` +
+      `<span class="chip overall">overall: ${esc(data.overall_risk_level)}</span>`;
+  }
+
+  function renderTree() {
+    tree.innerHTML = `<div class="dir">${esc(data.target)}/</div>` +
+      Object.keys(byFile).sort().map(fp =>
+        `<button data-file="${esc(fp)}" class="${filterFile === fp ? "active" : ""}">${esc(fp)} <span class="cnt">●${byFile[fp].length}</span></button>`).join("") +
+      `<button data-file="" class="${filterFile === "" ? "active" : ""}">all findings <span class="cnt">${findings.length}</span></button>`;
+  }
+
+  chipsEl.addEventListener("click", e => {
+    const btn = e.target.closest("button.chip"); if (!btn) return;
+    filterSev = (filterSev === btn.dataset.sev) ? "" : btn.dataset.sev;
+    renderChips(); render();
+  });
 
   tree.addEventListener("click", e => {
     const btn = e.target.closest("button"); if (!btn) return;
-    tree.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
-    render(btn.dataset.file);
+    filterFile = btn.dataset.file;
+    renderTree(); render();
   });
 
-  function render(fileFilter) {
-    const list = fileFilter ? findings.filter(f => f.file_path === fileFilter) : findings;
-    document.getElementById("findings").innerHTML = list.map((f, i) => `
+  function render() {
+    const list = findings.filter(f =>
+      (!filterFile || f.file_path === filterFile) &&
+      (!filterSev || f.severity === filterSev));
+    const box = document.getElementById("findings");
+    if (!list.length) {
+      box.innerHTML = `<p style="color:var(--faint);font-size:14px;padding:8px 2px">No findings match this filter.</p>`;
+      return;
+    }
+    box.innerHTML = list.map((f, i) => `
       <div class="finding ${SEV_CLASS[f.severity]}${i === 0 ? " open" : ""}">
         <button>
           <span><span class="rt">${esc(f.risk_type)}</span>
@@ -301,15 +380,105 @@ async function main() {
     document.querySelectorAll(".finding > button").forEach(btn =>
       btn.addEventListener("click", () => btn.parentElement.classList.toggle("open")));
   }
-  render("");
+
+  renderChips();
+  renderTree();
+  render();
+
+  if (data.coverage_notes) {
+    document.getElementById("coverage").innerHTML =
+      `<b>Scan coverage</b> · ${esc(data.coverage_notes)}`;
+  }
 
   document.getElementById("action-plan").innerHTML = data.action_plan?.length
-    ? `<b>Action plan</b><ol>${data.action_plan.map(a => `<li>${esc(a)}</li>`).join("")}</ol>` : "";
+    ? `<span class="hd">Prioritized action plan</span><ol>${data.action_plan.map(a => `<li>${esc(a)}</li>`).join("")}</ol>` : "";
 
   document.getElementById("demo-note").textContent =
     `Report generated ${new Date(data.generated_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} by the actual pipeline — this page renders its JSON output unedited.`;
 }
 main();
+
+const STAGES = [
+  { n: "01", title: "Scan & profile", body: [
+    "The scanner walks the project directory, inventories every source file, and filters out noise — tests, vendored dependencies, build artifacts — so only real server code is analyzed.",
+    "A rule-based capability analyzer then infers what the project is and which sensitive capabilities it exposes: shell execution, file reads, network calls, prompt construction — all derived directly from the extracted code features."
+  ], points: [
+    "A supervisor uses this profile to activate only the relevant scanners — a filesystem-only server never runs the SSRF agent.",
+    "Trust boundaries (where model- or user-controlled input enters) are mapped up front."
+  ]},
+  { n: "02", title: "Extract features", body: [
+    "Python's AST module parses the source into a syntax tree and deterministically locates dangerous sinks: subprocess and os.system calls, open() and path operations, requests / urllib network calls, and prompt strings built from tool arguments. A regex layer covers JS/TS and config files.",
+    "There is no LLM guessing here — every feature is a concrete node in the parse tree with a file path and line range, which is what lets every downstream finding carry verbatim evidence."
+  ], points: [
+    "Deterministic and replayable: the same code always yields the same features.",
+    "Line-accurate evidence is captured before any interpretation happens."
+  ]},
+  { n: "03", title: "5 risk agents", body: [
+    "Five specialized agents each own one vulnerability class — prompt injection, command execution, file access, network / SSRF, and lifecycle — and each emits typed findings with a confidence score.",
+    "Four are fully deterministic: pattern and light dataflow heuristics over the AST features. Prompt injection is the one LLM-backed agent — it reads the tool's full source and judges whether untrusted input really reaches a prompt, replacing a brittle parameter-name regex, and falls back to that regex when no API key is set."
+  ], points: [
+    "Deterministic agents: command exec, file access, SSRF, lifecycle.",
+    "LLM agent: prompt injection — with a deterministic fallback.",
+    "Every finding is a typed Pydantic object, not free text."
+  ]},
+  { n: "04", title: "Blind review", body: [
+    "An Evaluator gates the findings: it rejects anything without real evidence, merges duplicates by proximity, and flags coverage gaps that trigger a re-run.",
+    "Low-confidence findings get an independent LLM second opinion. The reviewer re-reads the source without seeing the agent's score or reasoning, so its judgment is genuinely independent — and the divergence between agent and reviewer is recorded per risk type as a measurable signal. Findings are rescued or demoted accordingly."
+  ], points: [
+    "Evidence-less findings are dropped before they can reach the report.",
+    "Agent-vs-reviewer disagreement is tracked, not hidden."
+  ]},
+  { n: "05", title: "RAG + report", body: [
+    "Each accepted finding becomes its own query — risk type + attack path + evidence — against a curated CWE / OWASP knowledge base (Chroma embeddings, with a TF-IDF fallback). A relevance cutoff drops weak matches, so a finding only cites references that actually fit.",
+    "The reporter then renders structured Markdown and JSON: findings grouped by severity, evidence chains, per-finding references, and a prioritized P0 / P1 / P2 action plan. The executive summary can be LLM-polished but is always grounded in facts the pipeline already computed."
+  ], points: [
+    "The finding itself is the retrieval query — no user question exists (agentic RAG).",
+    "The report renders the pipeline's JSON output unedited — the same file this page reads."
+  ]}
+];
+
+(function initStages() {
+  const pipeEl = document.querySelector(".pipeline");
+  const sdEl = document.getElementById("stage-detail");
+  const cardEl = document.getElementById("sd-card");
+  if (!pipeEl || !sdEl || !cardEl) return;
+  const cards = () => pipeEl.querySelectorAll(".stage");
+  let open = -1;
+
+  function close() {
+    open = -1;
+    sdEl.classList.remove("show");
+    document.body.classList.remove("modal-open");
+    cards().forEach(c => { c.classList.remove("active"); c.setAttribute("aria-expanded", "false"); });
+  }
+
+  function openStage(i) {
+    open = i;
+    cards().forEach((c, j) => {
+      c.classList.toggle("active", j === i);
+      c.setAttribute("aria-expanded", j === i ? "true" : "false");
+    });
+    const st = STAGES[i];
+    cardEl.innerHTML =
+      `<button class="close" aria-label="Close details">Close ✕</button>` +
+      `<span class="sd-num">${st.n}</span><h3>${st.title}</h3>` +
+      st.body.map(p => `<p>${p}</p>`).join("") +
+      (st.points ? `<ul>${st.points.map(p => `<li>${p}</li>`).join("")}</ul>` : "");
+    cardEl.querySelector(".close").addEventListener("click", ev => { ev.stopPropagation(); close(); });
+    cardEl.scrollTop = 0;
+    sdEl.classList.add("show");
+    document.body.classList.add("modal-open");
+  }
+
+  pipeEl.addEventListener("click", e => {
+    const card = e.target.closest(".stage"); if (!card) return;
+    const i = +card.dataset.stage;
+    (open === i) ? close() : openStage(i);
+  });
+
+  sdEl.addEventListener("click", e => { if (e.target === sdEl) close(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && open !== -1) close(); });
+})();
 </script>
 
 </body>
